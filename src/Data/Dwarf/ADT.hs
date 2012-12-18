@@ -397,14 +397,16 @@ parseSubprogram die = do
 data Variable = Variable
   { varName :: String
   , varDecl :: Decl
-  , varLoc :: Maybe DW_ATVAL -- TODO: Parse this
+  , varLoc :: Maybe Dwarf.DW_OP -- TODO: Parse this
   , varType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 parseVariable :: DIE -> M Variable
 parseVariable die =
   Variable (getName die) (getDecl die)
-  (maybeAttr DW_AT_location die) <$> parseTypeRef die
+  (Dwarf.parseDW_OP (dieReader die) <$>
+   getMAttrVal DW_AT_location Dwarf.Lens.aTVAL_BLOB die) <$>
+  parseTypeRef die
 
 data Def
   = DefBaseType BaseType
