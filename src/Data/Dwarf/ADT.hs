@@ -12,6 +12,7 @@ module Data.Dwarf.ADT
   , SubrangeType(..), ArrayType(..)
   , EnumerationType(..), Enumerator(..)
   , SubroutineType(..), FormalParameter(..)
+  , Subprogram(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
@@ -326,11 +327,45 @@ data SubroutineType = SubroutineType
   , subrFormalParameters :: [FormalParameter]
   } deriving (Eq, Ord, Show)
 
+getPrototyped :: DIE -> Bool
+getPrototyped = getAttrVal DW_AT_prototyped Dwarf.Lens.aTVAL_BOOL
+
 parseSubroutineType :: DIE -> M SubroutineType
 parseSubroutineType die =
-  SubroutineType (getAttrVal DW_AT_prototyped Dwarf.Lens.aTVAL_BOOL die)
+  SubroutineType (getPrototyped die)
   <$> parseTypeRef die
   <*> mapM parseFormalParameter (dieChildren die)
+
+getLowPC :: DIE -> Word64
+getLowPC = getAttrVal DW_AT_low_pc Dwarf.Lens.aTVAL_UINT
+
+getHighPC :: DIE -> Word64
+getHighPC = getAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT
+
+-- DW_AT_name=(DW_ATVAL_STRING "selinux_enabled_check")
+-- DW_AT_decl_file=(DW_ATVAL_UINT 1)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 133)
+-- DW_AT_prototyped=(DW_ATVAL_BOOL True)
+-- DW_AT_type=(DW_ATVAL_REF (DieID 62))
+-- DW_AT_low_pc=(DW_ATVAL_UINT 135801260)
+-- DW_AT_high_pc=(DW_ATVAL_UINT 135801563)
+-- DW_AT_frame_base=(DW_ATVAL_UINT 0)
+data Subprogram = Subprogram
+  { subprogDecl :: Decl
+  , subprogPrototyped :: Bool
+  , subprogLowPC :: Word64
+  , subprogHighPC :: Word64
+  , subprogFrameBase :: Word64
+  , subprogType :: TypeRef
+  , subprogDefs :: [Def]
+  } deriving (Eq, Ord, Show)
+
+parseSubprogram :: DIE -> M Subprogram
+parseSubprogram die =
+  Subprogram (getDecl die) (getPrototyped die)
+  (getLowPC die) (getHighPC die)
+  (getAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
+  <$> parseTypeRef die <*> mapM parseDef (dieChildren die)
 
 data Def
   = DefBaseType BaseType
@@ -342,6 +377,7 @@ data Def
   | DefUnionType UnionType
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
+  | DefSubprogram Subprogram
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -360,6 +396,7 @@ parseDefI die =
   DW_TAG_union_type   -> fmap DefUnionType $ parseUnionType die
   DW_TAG_enumeration_type -> fmap DefEnumerationType $ parseEnumerationType die
   DW_TAG_subroutine_type -> fmap DefSubroutineType $ parseSubroutineType die
+  DW_TAG_subprogram   -> fmap DefSubprogram $ parseSubprogram die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
@@ -400,8 +437,7 @@ parseCU _endianess _targetSize _sections dieMap die =
   (Dwarf.dw_lang (getAttrVal DW_AT_language Dwarf.Lens.aTVAL_UINT die))
   (getName die)
   (getAttrVal DW_AT_comp_dir Dwarf.Lens.aTVAL_STRING die)
-  (getAttrVal DW_AT_low_pc Dwarf.Lens.aTVAL_UINT die)
-  (getAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT die)
+  (getLowPC die) (getHighPC die)
   -- lineNumInfo
   <$> mapM parseDef (dieChildren die)
   where
