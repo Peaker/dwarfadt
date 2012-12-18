@@ -1,4 +1,4 @@
-module ElfDwarf (loadElfDwarf) where
+module Data.Dwarf.Elf (loadElfDwarf) where
 
 import Control.Applicative ((<$>), Applicative(..))
 import Control.Error (justErr)

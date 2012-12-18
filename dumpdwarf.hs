@@ -1,7 +1,7 @@
 module Main(main) where
 
+import Data.Dwarf.Elf (loadElfDwarf)
 import Data.Tree (Tree(..), drawTree)
-import ElfDwarf (loadElfDwarf)
 import System.Environment (getArgs)
 import qualified Data.Dwarf as Dwarf
 
