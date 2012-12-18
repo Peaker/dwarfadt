@@ -22,7 +22,6 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (Reader, runReader)
 import Control.Monad.Trans.State (StateT, evalStateT)
 import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..), (!?))
-import Data.Either (partitionEithers)
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
@@ -358,23 +357,35 @@ data Subprogram = Subprogram
   , subprogLowPC :: Word64
   , subprogHighPC :: Word64
   , subprogFrameBase :: Word64
-  , subprogType :: TypeRef
   , subprogFormalParameters :: [FormalParameter]
-  , subprogDefs :: [Def]
+  , subprogVariables :: [Variable]
+  , subprogType :: TypeRef
   } deriving (Eq, Ord, Show)
+
+data SubprogramChild
+  = SubprogramChildLexicalBlock
+  | SubprogramChildLabel
+  | SubprogramChildFormalParameter FormalParameter
+  | SubprogramChildVariable Variable
 
 parseSubprogram :: DIE -> M Subprogram
 parseSubprogram die = do
-  (formalParams, defs) <- partitionEithers <$> mapM parseChild (dieChildren die)
+  children <- mapM parseChild (dieChildren die)
   Subprogram (getDecl die) (getPrototyped die)
     (getLowPC die) (getHighPC die)
     (getAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
-    <$> parseTypeRef die <*> pure formalParams <*> pure defs
+    [x | SubprogramChildFormalParameter x <- children]
+    [x | SubprogramChildVariable x <- children]
+    <$> parseTypeRef die
   where
     parseChild child =
       case dieTag child of
-      DW_TAG_formal_parameter -> Left <$> parseFormalParameter child
-      _ -> Right <$> parseDef child
+      DW_TAG_formal_parameter ->
+        SubprogramChildFormalParameter <$> parseFormalParameter child
+      DW_TAG_lexical_block -> pure SubprogramChildLexicalBlock -- TODO: Parse content?
+      DW_TAG_label -> pure SubprogramChildLabel
+      DW_TAG_variable -> SubprogramChildVariable <$> parseVariable child
+      tag -> error $ "unsupported child tag for subprogram: " ++ show tag
 
 -- DW_AT_name=(DW_ATVAL_STRING "sfs")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
@@ -405,7 +416,6 @@ data Def
   | DefSubroutineType SubroutineType
   | DefSubprogram Subprogram
   | DefVariable Variable
-  | DefLexicalBlock
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -426,8 +436,6 @@ parseDefI die =
   DW_TAG_subroutine_type -> fmap DefSubroutineType $ parseSubroutineType die
   DW_TAG_subprogram   -> fmap DefSubprogram $ parseSubprogram die
   DW_TAG_variable     -> fmap DefVariable $ parseVariable die
-  DW_TAG_lexical_block -> -- TODO: Parse inside lexical blocks
-    pure DefLexicalBlock
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
