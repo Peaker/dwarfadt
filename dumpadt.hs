@@ -16,4 +16,5 @@ main = do
     sections =
       Dwarf.ADT.Sections
       { Dwarf.ADT.dsDebugLine = elfSectionByName elf ".debug_line" }
-  mapM_ (print . Dwarf.ADT.parseCU endianess targetSize sections dieMap) cuDies
+    cus = map (Dwarf.ADT.parseCU endianess targetSize sections dieMap) cuDies
+  print $ head cus
