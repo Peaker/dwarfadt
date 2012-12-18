@@ -10,7 +10,8 @@ module Data.Dwarf.ADT
   , ConstType(..)
   , Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
-  , Enumerator(..), EnumerationType(..)
+  , EnumerationType(..), Enumerator(..)
+  , SubroutineType(..), FormalParameter(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
@@ -307,6 +308,30 @@ parseEnumerationType die =
   EnumerationType (getDecl die) (getByteSize die)
   <$> mapM parseEnumerator (dieChildren die)
 
+-- DW_AT_type=(DW_ATVAL_REF (DieID 119))
+data FormalParameter = FormalParameter
+  { formalParamType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseFormalParameter :: DIE -> M FormalParameter
+parseFormalParameter die =
+  verifyTag DW_TAG_formal_parameter die .
+  FormalParameter <$> parseTypeRef die
+
+-- DW_AT_prototyped=(DW_ATVAL_BOOL True)
+-- DW_AT_type=(DW_ATVAL_REF (DieID 62))
+data SubroutineType = SubroutineType
+  { subrPrototyped :: Bool
+  , subrType :: TypeRef
+  , subrFormalParameters :: [FormalParameter]
+  } deriving (Eq, Ord, Show)
+
+parseSubroutineType :: DIE -> M SubroutineType
+parseSubroutineType die =
+  SubroutineType (getAttrVal DW_AT_prototyped Dwarf.Lens.aTVAL_BOOL die)
+  <$> parseTypeRef die
+  <*> mapM parseFormalParameter (dieChildren die)
+
 data Def
   = DefBaseType BaseType
   | DefTypedef Typedef
@@ -316,6 +341,7 @@ data Def
   | DefArrayType ArrayType
   | DefUnionType UnionType
   | DefEnumerationType EnumerationType
+  | DefSubroutineType SubroutineType
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -333,6 +359,7 @@ parseDefI die =
   DW_TAG_array_type   -> fmap DefArrayType $ parseArrayType die
   DW_TAG_union_type   -> fmap DefUnionType $ parseUnionType die
   DW_TAG_enumeration_type -> fmap DefEnumerationType $ parseEnumerationType die
+  DW_TAG_subroutine_type -> fmap DefSubroutineType $ parseSubroutineType die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
