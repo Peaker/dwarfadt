@@ -100,6 +100,9 @@ parseAt i = cachedMake i $ do
   let die = Dwarf.dieRefsDIE $ dieMap Map.! i
   parseDefI die
 
+data Loc = LocOp Dwarf.DW_OP | LocWord64 Word64
+  deriving (Eq, Ord, Show)
+
 -------------------
 
 data TypeRef = Void | TypeRef Def
@@ -367,8 +370,9 @@ data Subprogram = Subprogram
   , subprogPrototyped :: Bool
   , subprogLowPC :: Maybe Word64
   , subprogHighPC :: Maybe Word64
-  , subprogFrameBase :: Maybe Word64
+  , subprogFrameBase :: Maybe Loc
   , subprogFormalParameters :: [FormalParameter]
+  , subprogUnspecifiedParameters :: Bool
   , subprogVariables :: [Variable (Maybe String)]
   , subprogType :: TypeRef
   } deriving (Eq, Ord, Show)
@@ -377,14 +381,17 @@ data SubprogramChild
   = SubprogramChildFormalParameter FormalParameter
   | SubprogramChildVariable (Variable (Maybe String))
   | SubprogramChildIgnored
+  | SubprogramChildUnspecifiedParameters
+  deriving (Eq)
 
 parseSubprogram :: DIE -> M Subprogram
 parseSubprogram die = do
   children <- mapM parseChild (dieChildren die)
   Subprogram (getDecl die) (getPrototyped die)
     (getMLowPC die) (getMHighPC die)
-    (getMAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
+    (parseLoc die <$> maybeAttr DW_AT_frame_base die)
     [x | SubprogramChildFormalParameter x <- children]
+    (SubprogramChildUnspecifiedParameters `elem` children)
     [x | SubprogramChildVariable x <- children]
     <$> parseTypeRef die
   where
@@ -397,10 +404,8 @@ parseSubprogram die = do
       DW_TAG_variable -> SubprogramChildVariable <$> parseVariable getMName child
       DW_TAG_inlined_subroutine -> pure SubprogramChildIgnored
       DW_TAG_user 137 -> pure SubprogramChildIgnored -- GNU extensions, safe to ignore here
-      tag -> error $ "unsupported child tag for subprogram: " ++ show tag
-
-data Loc = LocOp Dwarf.DW_OP | LocWord64 Word64
-  deriving (Eq, Ord, Show)
+      DW_TAG_unspecified_parameters -> pure SubprogramChildUnspecifiedParameters
+      tag -> error $ "unsupported child tag for subprogram: " ++ show tag ++ " in: " ++ show die
 
 -- DW_AT_name=(DW_ATVAL_STRING "sfs")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
@@ -417,15 +422,17 @@ data Variable name = Variable
 parseVariable :: (DIE -> a) -> DIE -> M (Variable a)
 parseVariable getVarName die =
   Variable (getVarName die) (getDecl die)
-  (parseLoc <$> maybeAttr DW_AT_location die) <$>
+  (parseLoc die <$> maybeAttr DW_AT_location die) <$>
   parseTypeRef die
   where
-    parseLoc (DW_ATVAL_BLOB blob) = LocOp $ Dwarf.parseDW_OP (dieReader die) blob
-    parseLoc (DW_ATVAL_UINT uint) = LocWord64 uint
-    parseLoc other =
-      error $
-      "Expected DW_ATVAL_BLOB or DW_ATVAL_UINT for DW_AT_location field of variable, got: " ++
-      show other
+
+parseLoc :: DIE -> DW_ATVAL -> Loc
+parseLoc die (DW_ATVAL_BLOB blob) = LocOp $ Dwarf.parseDW_OP (dieReader die) blob
+parseLoc _ (DW_ATVAL_UINT uint) = LocWord64 uint
+parseLoc _ other =
+  error $
+  "Expected DW_ATVAL_BLOB or DW_ATVAL_UINT for DW_AT_location field of variable, got: " ++
+  show other
 
 data Def
   = DefBaseType BaseType
