@@ -8,7 +8,7 @@ module Data.Dwarf.ADT
   , Typedef(..)
   , PtrType(..)
   , ConstType(..)
-  , Member(..), StructureType(..)
+  , Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
   ) where
 
@@ -37,15 +37,15 @@ verifyTag expected die x
   where
     tag = dieTag die
 
-uniqueAttr :: DIE -> DW_AT -> DW_ATVAL
-uniqueAttr die at =
+uniqueAttr :: DW_AT -> DIE -> DW_ATVAL
+uniqueAttr at die =
   case die !? at of
   [val] -> val
   [] -> error $ show die ++ ": Missing value for attribute: " ++ show at
   xs -> error $ show die ++ ": Multiple values for attribute: " ++ show at ++ ": " ++ show xs
 
-maybeAttr :: DIE -> DW_AT -> Maybe DW_ATVAL
-maybeAttr die at =
+maybeAttr :: DW_AT -> DIE -> Maybe DW_ATVAL
+maybeAttr at die =
   case die !? at of
   [val] -> Just val
   [] -> Nothing
@@ -55,14 +55,17 @@ getATVal :: DIE -> DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DW_ATVAL -> a
 getATVal die at prism = Dwarf.Lens.getATVal (show die ++ " attribute " ++ show at) prism
 
 getAttrVal :: DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DIE -> a
-getAttrVal at prism die = getATVal die at prism $ uniqueAttr die at
+getAttrVal at prism die = getATVal die at prism $ uniqueAttr at die
 
 getMAttrVal :: DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DIE -> Maybe a
 getMAttrVal at prism die =
-  getATVal die at prism <$> maybeAttr die at
+  getATVal die at prism <$> maybeAttr at die
 
 getName :: DIE -> String
 getName = getAttrVal DW_AT_name Dwarf.Lens.aTVAL_STRING
+
+getMName :: DIE -> Maybe String
+getMName = getMAttrVal DW_AT_name Dwarf.Lens.aTVAL_STRING
 
 ---------- Monad
 newtype M a = M (StateT (Map DieID Def) (Reader DIEMap) a)
@@ -127,6 +130,9 @@ getDecl die =
   where
     get at = getMAttrVal at Dwarf.Lens.aTVAL_UINT die
 
+getByteSize :: DIE -> Word
+getByteSize = fromIntegral . getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
+
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_encoding=(DW_ATVAL_UINT 7)
 -- DW_AT_name=(DW_ATVAL_STRING "long unsigned int")
@@ -141,9 +147,9 @@ parseBaseType :: DIE -> M BaseType
 parseBaseType die =
   pure $
   BaseType (dieId die)
-  (fromIntegral (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die))
+  (getByteSize die)
   (fromIntegral (getAttrVal DW_AT_encoding Dwarf.Lens.aTVAL_UINT die))
-  (getMAttrVal DW_AT_name Dwarf.Lens.aTVAL_STRING die)
+  (getMName die)
 
 -- DW_AT_name=(DW_ATVAL_STRING "ptrdiff_t")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 3)
@@ -179,7 +185,7 @@ parsePtrType :: DIE -> M PtrType
 parsePtrType die =
   PtrType
   <$> parseTypeRef die
-  <*> (pure . fromIntegral) (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die)
+  <*> pure (getByteSize die)
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 104))
 data ConstType = ConstType
@@ -195,17 +201,17 @@ parseConstType die =
 -- DW_AT_decl_line=(DW_ATVAL_UINT 144)
 -- DW_AT_type=(DW_ATVAL_REF (DieID 221))
 -- DW_AT_data_member_location=(DW_ATVAL_BLOB "#\NUL")
-data Member = Member
-  { membName :: String
+data Member loc = Member
+  { membName :: Maybe String
   , membDecl :: Decl
-  , membLoc :: DW_ATVAL -- TODO: Parse this?
+  , membLoc :: loc
   , membType :: TypeRef
   } deriving (Eq, Ord, Show)
 
-parseMember :: DIE -> M Member
-parseMember die =
+parseMember :: (DIE -> loc) -> DIE -> M (Member loc)
+parseMember getLoc die =
   verifyTag DW_TAG_member die .
-  Member (getName die) (getDecl die) (uniqueAttr die DW_AT_data_member_location) <$>
+  Member (getMName die) (getDecl die) (getLoc die) <$>
   parseTypeRef die
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 8)
@@ -215,20 +221,20 @@ parseMember die =
 data StructureType = StructureType
   { stByteSize :: Word
   , stDecl :: Decl
-  , stMembers :: [Member]
+  , stMembers :: [Member DW_ATVAL]
   } deriving (Eq, Ord, Show)
 
 parseStructureType :: DIE -> M StructureType
 parseStructureType die =
-  StructureType
-  (fromIntegral (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die))
-  (getDecl die)
-  <$> mapM parseMember (dieChildren die)
+  StructureType (getByteSize die) (getDecl die) <$> mapM (parseMember getLoc) (dieChildren die)
+  where
+    getLoc = uniqueAttr DW_AT_data_member_location
+  -- TODO: Parse the member_location, It's a blob with a DWARF program..
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 101))
 -- DW_AT_upper_bound=(DW_ATVAL_UINT 1)
 data SubrangeType = SubrangeType
-  { subRangeUpperBound :: Int
+  { subRangeUpperBound :: Word
   , subRangeType :: TypeRef
   } deriving (Eq, Ord, Show)
 
@@ -253,6 +259,23 @@ parseArrayType die =
       [x] -> x
       cs -> error $ "Array must have exactly one child, not: " ++ show cs
 
+----------------
+
+-- DW_AT_byte_size=(DW_ATVAL_UINT 4)
+-- DW_AT_decl_file=(DW_ATVAL_UINT 6)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 96)
+data UnionType = UnionType
+  { unionByteSize :: Word
+  , unionDecl :: Decl
+  , unionMembers :: [Member (Maybe DW_ATVAL)]
+  } deriving (Eq, Ord, Show)
+
+parseUnionType :: DIE -> M UnionType
+parseUnionType die =
+  UnionType (getByteSize die) (getDecl die) <$> mapM (parseMember getLoc) (dieChildren die)
+  where
+    getLoc = maybeAttr DW_AT_data_member_location
+
 data Def
   = DefBaseType BaseType
   | DefTypedef Typedef
@@ -260,6 +283,7 @@ data Def
   | DefConstType ConstType
   | DefStructureType StructureType
   | DefArrayType ArrayType
+  | DefUnionType UnionType
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -275,6 +299,7 @@ parseDefI die =
   DW_TAG_const_type   -> fmap DefConstType . parseConstType $ noChildren die
   DW_TAG_structure_type -> fmap DefStructureType $ parseStructureType die
   DW_TAG_array_type   -> fmap DefArrayType $ parseArrayType die
+  DW_TAG_union_type   -> fmap DefUnionType $ parseUnionType die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
