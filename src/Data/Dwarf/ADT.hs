@@ -13,6 +13,7 @@ module Data.Dwarf.ADT
   , EnumerationType(..), Enumerator(..)
   , SubroutineType(..), FormalParameter(..)
   , Subprogram(..)
+  , Variable(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
@@ -367,6 +368,23 @@ parseSubprogram die =
   (getAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
   <$> parseTypeRef die <*> mapM parseDef (dieChildren die)
 
+-- DW_AT_name=(DW_ATVAL_STRING "sfs")
+-- DW_AT_decl_file=(DW_ATVAL_UINT 1)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 135)
+-- DW_AT_type=(DW_ATVAL_REF (DieID 2639))
+-- DW_AT_location=(DW_ATVAL_BLOB "\145\168\DEL")
+data Variable = Variable
+  { varName :: String
+  , varDecl :: Decl
+  , varLoc :: DW_ATVAL -- TODO: Parse this
+  , varType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseVariable :: DIE -> M Variable
+parseVariable die =
+  Variable (getName die) (getDecl die)
+  (uniqueAttr DW_AT_location die) <$> parseTypeRef die
+
 data Def
   = DefBaseType BaseType
   | DefTypedef Typedef
@@ -378,6 +396,7 @@ data Def
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
   | DefSubprogram Subprogram
+  | DefVariable Variable
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -397,6 +416,7 @@ parseDefI die =
   DW_TAG_enumeration_type -> fmap DefEnumerationType $ parseEnumerationType die
   DW_TAG_subroutine_type -> fmap DefSubroutineType $ parseSubroutineType die
   DW_TAG_subprogram   -> fmap DefSubprogram $ parseSubprogram die
+  DW_TAG_variable     -> fmap DefVariable $ parseVariable die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
