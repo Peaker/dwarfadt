@@ -1,6 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Data.Dwarf.ADT
   ( Sections(..), parseCU
+  , Boxed(..)
   , CompilationUnit(..)
   , Decl(..)
   , Def(..)
@@ -73,7 +74,7 @@ getMName :: DIE -> Maybe String
 getMName = getMAttrVal DW_AT_name Dwarf.Lens.aTVAL_STRING
 
 ---------- Monad
-newtype M a = M (StateT (Map DieID Def) (Reader DIEMap) a)
+newtype M a = M (StateT (Map DieID (Boxed Def)) (Reader DIEMap) a)
   deriving (Functor, Applicative, Monad, MonadFix)
 runM :: DIEMap -> M a -> a
 runM dieMap (M act) = runReader (evalStateT act Map.empty) dieMap
@@ -81,11 +82,11 @@ runM dieMap (M act) = runReader (evalStateT act Map.empty) dieMap
 askDIEMap :: M DIEMap
 askDIEMap = liftDefCache $ lift Reader.ask
 
-liftDefCache :: StateT (Map DieID Def) (Reader DIEMap) a -> M a
+liftDefCache :: StateT (Map DieID (Boxed Def)) (Reader DIEMap) a -> M a
 liftDefCache = M
 ---------- Monad
 
-cachedMake :: DieID -> M Def -> M Def
+cachedMake :: DieID -> M (Boxed Def) -> M (Boxed Def)
 cachedMake i act = do
   found <- liftDefCache . State.gets $ Map.lookup i
   case found of
@@ -94,7 +95,7 @@ cachedMake i act = do
       liftDefCache . State.modify $ Map.insert i res
       act
 
-parseAt :: DieID -> M Def
+parseAt :: DieID -> M (Boxed Def)
 parseAt i = cachedMake i $ do
   dieMap <- askDIEMap
   let die = Dwarf.dieRefsDIE $ dieMap Map.! i
@@ -105,14 +106,14 @@ data Loc = LocOp Dwarf.DW_OP | LocWord64 Word64
 
 -------------------
 
-data TypeRef = Void | TypeRef Def
+data TypeRef = Void | TypeRef (Boxed Def)
   deriving (Eq, Ord)
 
 instance Show TypeRef where
   show Void = "void"
   show (TypeRef _) = "(..type..)"
 
-toTypeRef :: Maybe Def -> TypeRef
+toTypeRef :: Maybe (Boxed Def) -> TypeRef
 toTypeRef Nothing = Void
 toTypeRef (Just x) = TypeRef x
 
@@ -144,12 +145,19 @@ getByteSize = fromIntegral . getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
 getMByteSize :: DIE -> Maybe Word
 getMByteSize = fmap fromIntegral . getMAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
 
+data Boxed a = Boxed
+  { bDieId :: DieID
+  , bData :: a
+  } deriving (Eq, Ord, Read, Show)
+
+box :: DIE -> a -> Boxed a
+box = Boxed . dieId
+
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_encoding=(DW_ATVAL_UINT 7)
 -- DW_AT_name=(DW_ATVAL_STRING "long unsigned int")
 data BaseType = BaseType
-  { btId :: DieID
-  , btByteSize :: Word
+  { btByteSize :: Word
   , btEncoding :: Dwarf.DW_ATE
   , btName :: Maybe String
   } deriving (Eq, Ord, Show)
@@ -157,7 +165,7 @@ data BaseType = BaseType
 parseBaseType :: DIE -> M BaseType
 parseBaseType die =
   pure $
-  BaseType (dieId die)
+  BaseType
   (getByteSize die)
   (Dwarf.dw_ate (getAttrVal DW_AT_encoding Dwarf.Lens.aTVAL_UINT die))
   (getMName die)
@@ -219,8 +227,9 @@ data Member loc = Member
   , membType :: TypeRef
   } deriving (Eq, Ord, Show)
 
-parseMember :: (DIE -> loc) -> DIE -> M (Member loc)
+parseMember :: (DIE -> loc) -> DIE -> M (Boxed (Member loc))
 parseMember getLoc die =
+  box die <$>
   verifyTag DW_TAG_member die .
   Member (getMName die) (getDecl die) (getLoc die) <$>
   parseTypeRef die
@@ -233,7 +242,7 @@ data StructureType = StructureType
   { stByteSize :: Maybe Word -- Does not exist for forward-declarations
   , stDecl :: Decl
   , stIsDeclaration :: Bool -- is forward-declaration
-  , stMembers :: [Member Dwarf.DW_OP]
+  , stMembers :: [Boxed (Member Dwarf.DW_OP)]
   } deriving (Eq, Ord, Show)
 
 parseStructureType :: DIE -> M StructureType
@@ -254,8 +263,9 @@ data SubrangeType = SubrangeType
   , subRangeType :: TypeRef
   } deriving (Eq, Ord, Show)
 
-parseSubrangeType :: DIE -> M SubrangeType
+parseSubrangeType :: DIE -> M (Boxed SubrangeType)
 parseSubrangeType die =
+  box die <$>
   verifyTag DW_TAG_subrange_type die .
   SubrangeType
   (fromIntegral (getAttrVal DW_AT_upper_bound Dwarf.Lens.aTVAL_UINT die))
@@ -263,7 +273,7 @@ parseSubrangeType die =
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
 data ArrayType = ArrayType
-  { atSubrangeType :: SubrangeType
+  { atSubrangeType :: (Boxed SubrangeType)
   , atType :: TypeRef
   } deriving (Eq, Ord, Show)
 
@@ -283,7 +293,7 @@ parseArrayType die =
 data UnionType = UnionType
   { unionByteSize :: Word
   , unionDecl :: Decl
-  , unionMembers :: [Member (Maybe DW_ATVAL)]
+  , unionMembers :: [Boxed (Member (Maybe DW_ATVAL))]
   } deriving (Eq, Ord, Show)
 
 parseUnionType :: DIE -> M UnionType
@@ -299,10 +309,9 @@ data Enumerator = Enumerator
   , enumeratorConstValue :: Int64
   } deriving (Eq, Ord, Show)
 
-parseEnumerator :: DIE -> M Enumerator
+parseEnumerator :: DIE -> M (Boxed Enumerator)
 parseEnumerator die =
-  pure .
-  verifyTag DW_TAG_enumerator die $
+  pure . box die . verifyTag DW_TAG_enumerator die $
   Enumerator
   (getName die)
   (getAttrVal DW_AT_const_value Dwarf.Lens.aTVAL_INT die)
@@ -313,7 +322,7 @@ parseEnumerator die =
 data EnumerationType = EnumerationType
   { enumDecl :: Decl
   , enumByteSize :: Word
-  , enumEnumerators :: [Enumerator]
+  , enumEnumerators :: [Boxed Enumerator]
   } deriving (Eq, Ord, Show)
 
 parseEnumerationType :: DIE -> M EnumerationType
@@ -326,8 +335,9 @@ data FormalParameter = FormalParameter
   { formalParamType :: TypeRef
   } deriving (Eq, Ord, Show)
 
-parseFormalParameter :: DIE -> M FormalParameter
+parseFormalParameter :: DIE -> M (Boxed FormalParameter)
 parseFormalParameter die =
+  box die <$>
   verifyTag DW_TAG_formal_parameter die .
   FormalParameter <$> parseTypeRef die
 
@@ -336,7 +346,7 @@ parseFormalParameter die =
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
   , subrType :: TypeRef
-  , subrFormalParameters :: [FormalParameter]
+  , subrFormalParameters :: [Boxed FormalParameter]
   } deriving (Eq, Ord, Show)
 
 getPrototyped :: DIE -> Bool
@@ -371,15 +381,15 @@ data Subprogram = Subprogram
   , subprogLowPC :: Maybe Word64
   , subprogHighPC :: Maybe Word64
   , subprogFrameBase :: Maybe Loc
-  , subprogFormalParameters :: [FormalParameter]
+  , subprogFormalParameters :: [Boxed FormalParameter]
   , subprogUnspecifiedParameters :: Bool
-  , subprogVariables :: [Variable (Maybe String)]
+  , subprogVariables :: [Boxed (Variable (Maybe String))]
   , subprogType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 data SubprogramChild
-  = SubprogramChildFormalParameter FormalParameter
-  | SubprogramChildVariable (Variable (Maybe String))
+  = SubprogramChildFormalParameter (Boxed FormalParameter)
+  | SubprogramChildVariable (Boxed (Variable (Maybe String)))
   | SubprogramChildIgnored
   | SubprogramChildUnspecifiedParameters
   deriving (Eq)
@@ -401,7 +411,7 @@ parseSubprogram die = do
         SubprogramChildFormalParameter <$> parseFormalParameter child
       DW_TAG_lexical_block -> pure SubprogramChildIgnored -- TODO: Parse content?
       DW_TAG_label -> pure SubprogramChildIgnored
-      DW_TAG_variable -> SubprogramChildVariable <$> parseVariable getMName child
+      DW_TAG_variable -> SubprogramChildVariable . box child  <$> parseVariable getMName child
       DW_TAG_inlined_subroutine -> pure SubprogramChildIgnored
       DW_TAG_user 137 -> pure SubprogramChildIgnored -- GNU extensions, safe to ignore here
       DW_TAG_unspecified_parameters -> pure SubprogramChildUnspecifiedParameters
@@ -452,8 +462,9 @@ noChildren :: DIE -> DIE
 noChildren die@DIE{dieChildren=[]} = die
 noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
 
-parseDefI :: DIE -> M Def
+parseDefI :: DIE -> M (Boxed Def)
 parseDefI die =
+  box die <$>
   case dieTag die of
   DW_TAG_base_type    -> fmap DefBaseType . parseBaseType $ noChildren die
   DW_TAG_typedef      -> fmap DefTypedef . parseTypedef $ noChildren die
@@ -468,7 +479,7 @@ parseDefI die =
   DW_TAG_variable     -> fmap DefVariable $ parseVariable getName die
   _ -> error $ "unsupported: " ++ show die
 
-parseDef :: DIE -> M Def
+parseDef :: DIE -> M (Boxed Def)
 parseDef die = cachedMake (dieId die) $ parseDefI die
 
 -- DW_AT_producer=(DW_ATVAL_STRING "GNU C 4.4.5")
@@ -479,15 +490,14 @@ parseDef die = cachedMake (dieId die) $ parseDefI die
 -- DW_AT_high_pc=(DW_ATVAL_UINT 135646754)
 -- DW_AT_stmt_list=(DW_ATVAL_UINT 0)
 data CompilationUnit = CompilationUnit
-  { cuId :: DieID
-  , cuProducer :: String
+  { cuProducer :: String
   , cuLanguage :: Dwarf.DW_LANG
   , cuName :: String
   , cuCompDir :: String
   , cuLowPc :: Word64
   , cuHighPc :: Maybe Word64
 --  , cuLineNumInfo :: ([String], [Dwarf.DW_LNE])
-  , cuDefs :: [Def]
+  , cuDefs :: [Boxed Def]
   } deriving (Show)
 
 newtype Sections = Sections
@@ -496,12 +506,12 @@ newtype Sections = Sections
 
 parseCU ::
   Dwarf.Endianess -> Dwarf.TargetSize -> Sections ->
-  DIEMap -> DIE -> CompilationUnit
+  DIEMap -> DIE -> Boxed CompilationUnit
 parseCU _endianess _targetSize _sections dieMap die =
   runM dieMap $
+  box die .
   verifyTag DW_TAG_compile_unit die .
   CompilationUnit
-  (dieId die)
   (getAttrVal DW_AT_producer Dwarf.Lens.aTVAL_STRING die)
   (Dwarf.dw_lang (getAttrVal DW_AT_language Dwarf.Lens.aTVAL_UINT die))
   (getName die)
