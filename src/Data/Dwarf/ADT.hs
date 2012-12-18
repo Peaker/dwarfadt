@@ -226,14 +226,16 @@ parseMember getLoc die =
 data StructureType = StructureType
   { stByteSize :: Word
   , stDecl :: Decl
-  , stMembers :: [Member DW_ATVAL]
+  , stMembers :: [Member Dwarf.DW_OP]
   } deriving (Eq, Ord, Show)
 
 parseStructureType :: DIE -> M StructureType
 parseStructureType die =
   StructureType (getByteSize die) (getDecl die) <$> mapM (parseMember getLoc) (dieChildren die)
   where
-    getLoc = uniqueAttr DW_AT_data_member_location
+    getLoc memb =
+      Dwarf.parseDW_OP (dieReader memb) $
+      getAttrVal DW_AT_data_member_location Dwarf.Lens.aTVAL_BLOB memb
   -- TODO: Parse the member_location, It's a blob with a DWARF program..
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 101))
