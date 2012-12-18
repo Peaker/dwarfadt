@@ -11,5 +11,5 @@ dieTree die = Node die . map dieTree $ Dwarf.dieChildren die
 main :: IO ()
 main = do
   [filename] <- getArgs
-  (cuDies, _) <- loadElfDwarf filename
+  (_, (cuDies, _)) <- loadElfDwarf Dwarf.LittleEndian filename
   putStrLn . drawTree . fmap show . head $ map dieTree cuDies

@@ -1,6 +1,8 @@
-module Data.Dwarf.ADT (parseCU, CompilationUnit(..)) where
+module Data.Dwarf.ADT (Sections(..), parseCU, CompilationUnit(..)) where
 
 import Data.Dwarf (DieID, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..), (!?))
+import Data.Word (Word64)
+import qualified Data.ByteString as BS
 import qualified Data.Dwarf as Dwarf
 import qualified Data.Dwarf.Lens as Dwarf.Lens
 
@@ -14,9 +16,14 @@ import qualified Data.Dwarf.Lens as Dwarf.Lens
 -- DW_AT_stmt_list=(DW_ATVAL_UINT 0)
 data CompilationUnit = CompilationUnit
   { cuDIE :: DieID
-  , producer :: String
-  , language :: Dwarf.DW_LANG
-  } deriving (Eq, Ord, Read, Show)
+  , cuProducer :: String
+  , cuLanguage :: Dwarf.DW_LANG
+  , cuName :: String
+  , cuCompDir :: String
+  , cuLowPc :: Word64
+  , cuHighPc :: Word64
+--  , cuLineNumInfo :: ([String], [Dwarf.DW_LNE])
+  } deriving (Eq, Ord, Show)
 
 verifyTag :: DW_TAG -> DIE -> a -> a
 verifyTag expected die x
@@ -37,12 +44,25 @@ getAttrVal container die at prism =
   Dwarf.Lens.getATVal (container ++ " attribute " ++ show at) prism $
   uniqueAttr container die at
 
-parseCU :: Dwarf.DIEMap -> DIE -> CompilationUnit
-parseCU _dieMap die =
+newtype Sections = Sections
+  { dsDebugLine :: BS.ByteString
+  }
+
+parseCU ::
+  Dwarf.Endianess -> Dwarf.TargetSize -> Sections ->
+  Dwarf.DIEMap -> DIE -> CompilationUnit
+parseCU _endianess _targetSize _sections _dieMap die =
   verifyTag DW_TAG_compile_unit die $
   CompilationUnit
   (dieId die)
   (getAttr DW_AT_producer Dwarf.Lens.aTVAL_STRING)
   (Dwarf.dw_lang (getAttr DW_AT_language Dwarf.Lens.aTVAL_UINT))
+  (getAttr DW_AT_name Dwarf.Lens.aTVAL_STRING)
+  (getAttr DW_AT_comp_dir Dwarf.Lens.aTVAL_STRING)
+  (getAttr DW_AT_low_pc Dwarf.Lens.aTVAL_UINT)
+  (getAttr DW_AT_high_pc Dwarf.Lens.aTVAL_UINT)
+  -- lineNumInfo
   where
+    -- lineNumInfo = Dwarf.parseLNE endianess targetSize stmt_list $ dsDebugLine sections
+    -- stmt_list = getAttr DW_AT_stmt_list Dwarf.Lens.aTVAL_UINT
     getAttr = getAttrVal "Compilation unit" die
