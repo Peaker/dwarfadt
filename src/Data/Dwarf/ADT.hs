@@ -369,15 +369,14 @@ data Subprogram = Subprogram
   , subprogHighPC :: Maybe Word64
   , subprogFrameBase :: Maybe Word64
   , subprogFormalParameters :: [FormalParameter]
-  , subprogVariables :: [Variable]
+  , subprogVariables :: [Variable (Maybe String)]
   , subprogType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 data SubprogramChild
-  = SubprogramChildLexicalBlock
-  | SubprogramChildLabel
-  | SubprogramChildFormalParameter FormalParameter
-  | SubprogramChildVariable Variable
+  = SubprogramChildFormalParameter FormalParameter
+  | SubprogramChildVariable (Variable (Maybe String))
+  | SubprogramChildIgnored
 
 parseSubprogram :: DIE -> M Subprogram
 parseSubprogram die = do
@@ -393,29 +392,40 @@ parseSubprogram die = do
       case dieTag child of
       DW_TAG_formal_parameter ->
         SubprogramChildFormalParameter <$> parseFormalParameter child
-      DW_TAG_lexical_block -> pure SubprogramChildLexicalBlock -- TODO: Parse content?
-      DW_TAG_label -> pure SubprogramChildLabel
-      DW_TAG_variable -> SubprogramChildVariable <$> parseVariable child
+      DW_TAG_lexical_block -> pure SubprogramChildIgnored -- TODO: Parse content?
+      DW_TAG_label -> pure SubprogramChildIgnored
+      DW_TAG_variable -> SubprogramChildVariable <$> parseVariable getMName child
+      DW_TAG_inlined_subroutine -> pure SubprogramChildIgnored
+      DW_TAG_user 137 -> pure SubprogramChildIgnored -- GNU extensions, safe to ignore here
       tag -> error $ "unsupported child tag for subprogram: " ++ show tag
+
+data Loc = LocOp Dwarf.DW_OP | LocWord64 Word64
+  deriving (Eq, Ord, Show)
 
 -- DW_AT_name=(DW_ATVAL_STRING "sfs")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 135)
 -- DW_AT_type=(DW_ATVAL_REF (DieID 2639))
 -- DW_AT_location=(DW_ATVAL_BLOB "\145\168\DEL")
-data Variable = Variable
-  { varName :: String
+data Variable name = Variable
+  { varName :: name
   , varDecl :: Decl
-  , varLoc :: Maybe Dwarf.DW_OP -- TODO: Parse this
+  , varLoc :: Maybe Loc
   , varType :: TypeRef
   } deriving (Eq, Ord, Show)
 
-parseVariable :: DIE -> M Variable
-parseVariable die =
-  Variable (getName die) (getDecl die)
-  (Dwarf.parseDW_OP (dieReader die) <$>
-   getMAttrVal DW_AT_location Dwarf.Lens.aTVAL_BLOB die) <$>
+parseVariable :: (DIE -> a) -> DIE -> M (Variable a)
+parseVariable getVarName die =
+  Variable (getVarName die) (getDecl die)
+  (parseLoc <$> maybeAttr DW_AT_location die) <$>
   parseTypeRef die
+  where
+    parseLoc (DW_ATVAL_BLOB blob) = LocOp $ Dwarf.parseDW_OP (dieReader die) blob
+    parseLoc (DW_ATVAL_UINT uint) = LocWord64 uint
+    parseLoc other =
+      error $
+      "Expected DW_ATVAL_BLOB or DW_ATVAL_UINT for DW_AT_location field of variable, got: " ++
+      show other
 
 data Def
   = DefBaseType BaseType
@@ -428,7 +438,7 @@ data Def
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
   | DefSubprogram Subprogram
-  | DefVariable Variable
+  | DefVariable (Variable String)
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -448,7 +458,7 @@ parseDefI die =
   DW_TAG_enumeration_type -> fmap DefEnumerationType $ parseEnumerationType die
   DW_TAG_subroutine_type -> fmap DefSubroutineType $ parseSubroutineType die
   DW_TAG_subprogram   -> fmap DefSubprogram $ parseSubprogram die
-  DW_TAG_variable     -> fmap DefVariable $ parseVariable die
+  DW_TAG_variable     -> fmap DefVariable $ parseVariable getName die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
