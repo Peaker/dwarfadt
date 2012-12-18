@@ -90,6 +90,7 @@ parseAt i = cachedMake i $ do
 -------------------
 
 data TypeRef = Void | TypeRef Def
+  deriving (Eq, Ord)
 
 instance Show TypeRef where
   show Void = "void"
@@ -105,7 +106,7 @@ data Decl = Decl
   { declFile :: Maybe Word64 -- TODO: Convert to FilePath with LNI
   , declLine :: Maybe Int
   , declColumn :: Maybe Int
-  }
+  } deriving (Eq, Ord)
 
 instance Show Decl where
   show (Decl f l c) = intercalate ":" $ fmap ("FN"++) (toList f) ++ toList l ++ toList c
@@ -147,7 +148,7 @@ data Typedef = Typedef
   { tdName :: String
   , tdDecl :: Decl
   , tdType :: TypeRef
-  }
+  } deriving (Eq, Ord)
 
 instance Show Typedef where
   show (Typedef name decl _) = "Typedef " ++ show name ++ "@(" ++ show decl ++ ") = .."
@@ -164,7 +165,7 @@ parseTypedef die =
 data PtrType = PtrType
   { ptType :: TypeRef
   , ptByteSize :: Word
-  }
+  } deriving (Eq, Ord)
 
 instance Show PtrType where
   show (PtrType t _) = "Ptr to " ++ show t
@@ -175,8 +176,8 @@ parsePtrType die =
   <$> parseTypeRef die
   <*> (pure . fromIntegral) (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die)
 
-data Def = DefBaseType BaseType | DefTypedef Typedef | DefPtrType PtrType | DefUnknown DIE
-  deriving (Show)
+data Def = DefBaseType BaseType | DefTypedef Typedef | DefPtrType PtrType
+  deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
 noChildren die@DIE{dieChildren=[]} = die
@@ -189,7 +190,7 @@ parseDefI die =
   DW_TAG_typedef      -> fmap DefTypedef . parseTypedef $ noChildren die
   DW_TAG_pointer_type -> fmap DefPtrType . parsePtrType $ noChildren die
 --  DW_TAG_const_type   -> fmap DefConstType . parseConstType $ noChildren die
-  _ -> pure $ DefUnknown die
+  _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
 parseDef die = cachedMake (dieId die) $ parseDefI die
