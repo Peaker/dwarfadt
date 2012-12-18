@@ -10,6 +10,7 @@ module Data.Dwarf.ADT
   , ConstType(..)
   , Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
+  , Enumerator(..), EnumerationType(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
@@ -18,6 +19,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (Reader, runReader)
 import Control.Monad.Trans.State (StateT, evalStateT)
 import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..), (!?))
+import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
 import Data.Maybe (maybeToList)
@@ -276,6 +278,35 @@ parseUnionType die =
   where
     getLoc = maybeAttr DW_AT_data_member_location
 
+-- DW_AT_name=(DW_ATVAL_STRING "_SC_ARG_MAX")
+-- DW_AT_const_value=(DW_ATVAL_INT 0)
+data Enumerator = Enumerator
+  { enumeratorName :: String
+  , enumeratorConstValue :: Int64
+  } deriving (Eq, Ord, Show)
+
+parseEnumerator :: DIE -> M Enumerator
+parseEnumerator die =
+  pure .
+  verifyTag DW_TAG_enumerator die $
+  Enumerator
+  (getName die)
+  (getAttrVal DW_AT_const_value Dwarf.Lens.aTVAL_INT die)
+
+-- DW_AT_byte_size=(DW_ATVAL_UINT 4)
+-- DW_AT_decl_file=(DW_ATVAL_UINT 11)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 74)
+data EnumerationType = EnumerationType
+  { enumDecl :: Decl
+  , enumByteSize :: Word
+  , enumEnumerators :: [Enumerator]
+  } deriving (Eq, Ord, Show)
+
+parseEnumerationType :: DIE -> M EnumerationType
+parseEnumerationType die =
+  EnumerationType (getDecl die) (getByteSize die)
+  <$> mapM parseEnumerator (dieChildren die)
+
 data Def
   = DefBaseType BaseType
   | DefTypedef Typedef
@@ -284,6 +315,7 @@ data Def
   | DefStructureType StructureType
   | DefArrayType ArrayType
   | DefUnionType UnionType
+  | DefEnumerationType EnumerationType
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -300,6 +332,7 @@ parseDefI die =
   DW_TAG_structure_type -> fmap DefStructureType $ parseStructureType die
   DW_TAG_array_type   -> fmap DefArrayType $ parseArrayType die
   DW_TAG_union_type   -> fmap DefUnionType $ parseUnionType die
+  DW_TAG_enumeration_type -> fmap DefEnumerationType $ parseEnumerationType die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
