@@ -46,18 +46,18 @@ uniqueAttr :: DW_AT -> DIE -> DW_ATVAL
 uniqueAttr at die =
   case die !? at of
   [val] -> val
-  [] -> error $ show die ++ ": Missing value for attribute: " ++ show at
-  xs -> error $ show die ++ ": Multiple values for attribute: " ++ show at ++ ": " ++ show xs
+  [] -> error $ "Missing value for attribute: " ++ show at ++ " in " ++ show die
+  xs -> error $ "Multiple values for attribute: " ++ show at ++ ": " ++ show xs ++ " in " ++ show die
 
 maybeAttr :: DW_AT -> DIE -> Maybe DW_ATVAL
 maybeAttr at die =
   case die !? at of
   [val] -> Just val
   [] -> Nothing
-  xs -> error $ show die ++ ": Multiple values for attribute: " ++ show at ++ ": " ++ show xs
+  xs -> error $ "Multiple values for attribute: " ++ show at ++ ": " ++ show xs ++ " in " ++ show die
 
 getATVal :: DIE -> DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DW_ATVAL -> a
-getATVal die at prism = Dwarf.Lens.getATVal (show die ++ " attribute " ++ show at) prism
+getATVal die at prism = Dwarf.Lens.getATVal ("attribute " ++ show at ++ " of " ++ show die) prism
 
 getAttrVal :: DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DIE -> a
 getAttrVal at prism die = getATVal die at prism $ uniqueAttr at die
@@ -395,14 +395,14 @@ parseSubprogram die = do
 data Variable = Variable
   { varName :: String
   , varDecl :: Decl
-  , varLoc :: DW_ATVAL -- TODO: Parse this
+  , varLoc :: Maybe DW_ATVAL -- TODO: Parse this
   , varType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 parseVariable :: DIE -> M Variable
 parseVariable die =
   Variable (getName die) (getDecl die)
-  (uniqueAttr DW_AT_location die) <$> parseTypeRef die
+  (maybeAttr DW_AT_location die) <$> parseTypeRef die
 
 data Def
   = DefBaseType BaseType
@@ -420,7 +420,7 @@ data Def
 
 noChildren :: DIE -> DIE
 noChildren die@DIE{dieChildren=[]} = die
-noChildren die@DIE{dieChildren=cs} = error $ show die ++ " is not expected to have children, has: " ++ show cs
+noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
 
 parseDefI :: DIE -> M Def
 parseDefI die =
