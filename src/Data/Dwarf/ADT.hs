@@ -144,7 +144,7 @@ getByteSize = fromIntegral . getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
 data BaseType = BaseType
   { btId :: DieID
   , btByteSize :: Word
-  , btEncoding :: Word
+  , btEncoding :: Dwarf.DW_ATE
   , btName :: Maybe String
   } deriving (Eq, Ord, Show)
 
@@ -153,7 +153,7 @@ parseBaseType die =
   pure $
   BaseType (dieId die)
   (getByteSize die)
-  (fromIntegral (getAttrVal DW_AT_encoding Dwarf.Lens.aTVAL_UINT die))
+  (Dwarf.dw_ate (getAttrVal DW_AT_encoding Dwarf.Lens.aTVAL_UINT die))
   (getMName die)
 
 -- DW_AT_name=(DW_ATVAL_STRING "ptrdiff_t")
