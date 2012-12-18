@@ -4,7 +4,12 @@ module Data.Dwarf.ADT
   , CompilationUnit(..)
   , Decl(..)
   , Def(..)
-  , BaseType(..), Typedef(..), PtrType(..)
+  , BaseType(..)
+  , Typedef(..)
+  , PtrType(..)
+  , ConstType(..)
+  , Member(..), StructureType(..)
+  , SubrangeType(..), ArrayType(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
@@ -176,7 +181,85 @@ parsePtrType die =
   <$> parseTypeRef die
   <*> (pure . fromIntegral) (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die)
 
-data Def = DefBaseType BaseType | DefTypedef Typedef | DefPtrType PtrType
+-- DW_AT_type=(DW_ATVAL_REF (DieID 104))
+data ConstType = ConstType
+  { ctType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseConstType :: DIE -> M ConstType
+parseConstType die =
+  ConstType <$> parseTypeRef die
+
+-- DW_AT_name=(DW_ATVAL_STRING "__val")
+-- DW_AT_decl_file=(DW_ATVAL_UINT 4)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 144)
+-- DW_AT_type=(DW_ATVAL_REF (DieID 221))
+-- DW_AT_data_member_location=(DW_ATVAL_BLOB "#\NUL")
+data Member = Member
+  { membName :: String
+  , membDecl :: Decl
+  , membLoc :: DW_ATVAL -- TODO: Parse this?
+  , membType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseMember :: DIE -> M Member
+parseMember die =
+  verifyTag DW_TAG_member die .
+  Member (getName die) (getDecl die) (uniqueAttr die DW_AT_data_member_location) <$>
+  parseTypeRef die
+
+-- DW_AT_byte_size=(DW_ATVAL_UINT 8)
+-- DW_AT_decl_file=(DW_ATVAL_UINT 4)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 144)
+-- DW_AT_sibling=(DW_ATVAL_REF (DieID 221))}
+data StructureType = StructureType
+  { stByteSize :: Word
+  , stDecl :: Decl
+  , stMembers :: [Member]
+  } deriving (Eq, Ord, Show)
+
+parseStructureType :: DIE -> M StructureType
+parseStructureType die =
+  StructureType
+  (fromIntegral (getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT die))
+  (getDecl die)
+  <$> mapM parseMember (dieChildren die)
+
+-- DW_AT_type=(DW_ATVAL_REF (DieID 101))
+-- DW_AT_upper_bound=(DW_ATVAL_UINT 1)
+data SubrangeType = SubrangeType
+  { subRangeUpperBound :: Int
+  , subRangeType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseSubrangeType :: DIE -> M SubrangeType
+parseSubrangeType die =
+  verifyTag DW_TAG_subrange_type die .
+  SubrangeType
+  (fromIntegral (getAttrVal DW_AT_upper_bound Dwarf.Lens.aTVAL_UINT die))
+  <$> parseTypeRef die
+
+-- DW_AT_type=(DW_ATVAL_REF (DieID 62))
+data ArrayType = ArrayType
+  { atSubrangeType :: SubrangeType
+  , atType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseArrayType :: DIE -> M ArrayType
+parseArrayType die =
+  ArrayType <$> parseSubrangeType child <*> parseTypeRef die
+  where
+    child = case dieChildren die of
+      [x] -> x
+      cs -> error $ "Array must have exactly one child, not: " ++ show cs
+
+data Def
+  = DefBaseType BaseType
+  | DefTypedef Typedef
+  | DefPtrType PtrType
+  | DefConstType ConstType
+  | DefStructureType StructureType
+  | DefArrayType ArrayType
   deriving (Eq, Ord, Show)
 
 noChildren :: DIE -> DIE
@@ -189,7 +272,9 @@ parseDefI die =
   DW_TAG_base_type    -> fmap DefBaseType . parseBaseType $ noChildren die
   DW_TAG_typedef      -> fmap DefTypedef . parseTypedef $ noChildren die
   DW_TAG_pointer_type -> fmap DefPtrType . parsePtrType $ noChildren die
---  DW_TAG_const_type   -> fmap DefConstType . parseConstType $ noChildren die
+  DW_TAG_const_type   -> fmap DefConstType . parseConstType $ noChildren die
+  DW_TAG_structure_type -> fmap DefStructureType $ parseStructureType die
+  DW_TAG_array_type   -> fmap DefArrayType $ parseArrayType die
   _ -> error $ "unsupported: " ++ show die
 
 parseDef :: DIE -> M Def
