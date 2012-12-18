@@ -25,7 +25,7 @@ import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..), 
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
-import Data.Maybe (maybeToList)
+import Data.Maybe (fromMaybe, maybeToList)
 import Data.Traversable (traverse)
 import Data.Word (Word, Word64)
 import qualified Control.Monad.Trans.Reader as Reader
@@ -138,6 +138,9 @@ getDecl die =
 getByteSize :: DIE -> Word
 getByteSize = fromIntegral . getAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
 
+getMByteSize :: DIE -> Maybe Word
+getMByteSize = fmap fromIntegral . getMAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_UINT
+
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_encoding=(DW_ATVAL_UINT 7)
 -- DW_AT_name=(DW_ATVAL_STRING "long unsigned int")
@@ -224,14 +227,17 @@ parseMember getLoc die =
 -- DW_AT_decl_line=(DW_ATVAL_UINT 144)
 -- DW_AT_sibling=(DW_ATVAL_REF (DieID 221))}
 data StructureType = StructureType
-  { stByteSize :: Word
+  { stByteSize :: Maybe Word -- Does not exist for forward-declarations
   , stDecl :: Decl
+  , stIsDeclaration :: Bool -- is forward-declaration
   , stMembers :: [Member Dwarf.DW_OP]
   } deriving (Eq, Ord, Show)
 
 parseStructureType :: DIE -> M StructureType
 parseStructureType die =
-  StructureType (getByteSize die) (getDecl die) <$> mapM (parseMember getLoc) (dieChildren die)
+  StructureType (getMByteSize die) (getDecl die)
+  (fromMaybe False (getMAttrVal DW_AT_declaration Dwarf.Lens.aTVAL_BOOL die))
+  <$> mapM (parseMember getLoc) (dieChildren die)
   where
     getLoc memb =
       Dwarf.parseDW_OP (dieReader memb) $
@@ -331,7 +337,7 @@ data SubroutineType = SubroutineType
   } deriving (Eq, Ord, Show)
 
 getPrototyped :: DIE -> Bool
-getPrototyped = getAttrVal DW_AT_prototyped Dwarf.Lens.aTVAL_BOOL
+getPrototyped = fromMaybe False . getMAttrVal DW_AT_prototyped Dwarf.Lens.aTVAL_BOOL
 
 parseSubroutineType :: DIE -> M SubroutineType
 parseSubroutineType die =
@@ -342,8 +348,11 @@ parseSubroutineType die =
 getLowPC :: DIE -> Word64
 getLowPC = getAttrVal DW_AT_low_pc Dwarf.Lens.aTVAL_UINT
 
-getHighPC :: DIE -> Word64
-getHighPC = getAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT
+getMLowPC :: DIE -> Maybe Word64
+getMLowPC = getMAttrVal DW_AT_low_pc Dwarf.Lens.aTVAL_UINT
+
+getMHighPC :: DIE -> Maybe Word64
+getMHighPC = getMAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT
 
 -- DW_AT_name=(DW_ATVAL_STRING "selinux_enabled_check")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
@@ -356,9 +365,9 @@ getHighPC = getAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT
 data Subprogram = Subprogram
   { subprogDecl :: Decl
   , subprogPrototyped :: Bool
-  , subprogLowPC :: Word64
-  , subprogHighPC :: Word64
-  , subprogFrameBase :: Word64
+  , subprogLowPC :: Maybe Word64
+  , subprogHighPC :: Maybe Word64
+  , subprogFrameBase :: Maybe Word64
   , subprogFormalParameters :: [FormalParameter]
   , subprogVariables :: [Variable]
   , subprogType :: TypeRef
@@ -374,8 +383,8 @@ parseSubprogram :: DIE -> M Subprogram
 parseSubprogram die = do
   children <- mapM parseChild (dieChildren die)
   Subprogram (getDecl die) (getPrototyped die)
-    (getLowPC die) (getHighPC die)
-    (getAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
+    (getMLowPC die) (getMHighPC die)
+    (getMAttrVal DW_AT_frame_base Dwarf.Lens.aTVAL_UINT die)
     [x | SubprogramChildFormalParameter x <- children]
     [x | SubprogramChildVariable x <- children]
     <$> parseTypeRef die
@@ -459,7 +468,7 @@ data CompilationUnit = CompilationUnit
   , cuName :: String
   , cuCompDir :: String
   , cuLowPc :: Word64
-  , cuHighPc :: Word64
+  , cuHighPc :: Maybe Word64
 --  , cuLineNumInfo :: ([String], [Dwarf.DW_LNE])
   , cuDefs :: [Def]
   } deriving (Show)
@@ -480,7 +489,7 @@ parseCU _endianess _targetSize _sections dieMap die =
   (Dwarf.dw_lang (getAttrVal DW_AT_language Dwarf.Lens.aTVAL_UINT die))
   (getName die)
   (getAttrVal DW_AT_comp_dir Dwarf.Lens.aTVAL_STRING die)
-  (getLowPC die) (getHighPC die)
+  (getLowPC die) (getMHighPC die)
   -- lineNumInfo
   <$> mapM parseDef (dieChildren die)
   where
