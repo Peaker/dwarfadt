@@ -18,6 +18,8 @@ import Data.Word (Word64)
 import qualified Data.ByteString as BS
 import qualified Data.Monoid as Monoid
 
+{-# ANN module "HLint: ignore Use camelCase" #-}
+
 type ATVAL_NamedPrism a = (String, Getting (Monoid.First a) DW_ATVAL DW_ATVAL a a)
 
 makePrisms ''DW_ATVAL

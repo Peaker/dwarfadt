@@ -57,7 +57,7 @@ maybeAttr at die =
   xs -> error $ "Multiple values for attribute: " ++ show at ++ ": " ++ show xs ++ " in " ++ show die
 
 getATVal :: DIE -> DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DW_ATVAL -> a
-getATVal die at prism = Dwarf.Lens.getATVal ("attribute " ++ show at ++ " of " ++ show die) prism
+getATVal die at = Dwarf.Lens.getATVal ("attribute " ++ show at ++ " of " ++ show die)
 
 getAttrVal :: DW_AT -> Dwarf.Lens.ATVAL_NamedPrism a -> DIE -> a
 getAttrVal at prism die = getATVal die at prism $ uniqueAttr at die
@@ -272,7 +272,7 @@ parseSubrangeType die =
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
 data ArrayType = ArrayType
-  { atSubrangeType :: (Boxed SubrangeType)
+  { atSubrangeType :: Boxed SubrangeType
   , atType :: TypeRef
   } deriving (Eq, Ord, Show)
 
