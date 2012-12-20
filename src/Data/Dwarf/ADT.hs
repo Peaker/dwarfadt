@@ -5,6 +5,7 @@ module Data.Dwarf.ADT
   , CompilationUnit(..)
   , Decl(..)
   , Def(..)
+  , TypeRef(..)
   , BaseType(..)
   , Typedef(..)
   , PtrType(..)
@@ -16,6 +17,9 @@ module Data.Dwarf.ADT
   , Subprogram(..)
   , Variable(..)
   ) where
+
+-- TODO: Separate ADT for type definitions, sum that with
+-- subprogram/variable to get a CompilationUnitDef
 
 import Control.Applicative (Applicative(..), (<$>))
 import Control.Monad.Fix (MonadFix, mfix)
@@ -147,7 +151,7 @@ getMByteSize = fmap fromIntegral . getMAttrVal DW_AT_byte_size Dwarf.Lens.aTVAL_
 data Boxed a = Boxed
   { bDieId :: DieID
   , bData :: a
-  } deriving (Eq, Ord, Read, Show)
+  } deriving (Eq, Ord, Show)
 
 box :: DIE -> a -> Boxed a
 box = Boxed . dieId
@@ -233,12 +237,13 @@ parseMember getLoc die =
   Member (getMName die) (getDecl die) (getLoc die) <$>
   parseTypeRef die
 
--- DW_AT_byte_size=(DW_ATVAL_UINT 8)
--- DW_AT_decl_file=(DW_ATVAL_UINT 4)
--- DW_AT_decl_line=(DW_ATVAL_UINT 144)
--- DW_AT_sibling=(DW_ATVAL_REF (DieID 221))}
+-- DW_AT_name=(DW_ATVAL_STRING "__pthread_mutex_s")
+-- DW_AT_byte_size=(DW_ATVAL_UINT 24)
+-- DW_AT_decl_file=(DW_ATVAL_UINT 6)
+-- DW_AT_decl_line=(DW_ATVAL_UINT 79)
 data StructureType = StructureType
-  { stByteSize :: Maybe Word -- Does not exist for forward-declarations
+  { stName :: Maybe String
+  , stByteSize :: Maybe Word -- Does not exist for forward-declarations
   , stDecl :: Decl
   , stIsDeclaration :: Bool -- is forward-declaration
   , stMembers :: [Boxed (Member Dwarf.DW_OP)]
@@ -246,7 +251,7 @@ data StructureType = StructureType
 
 parseStructureType :: DIE -> M StructureType
 parseStructureType die =
-  StructureType (getMByteSize die) (getDecl die)
+  StructureType (getMName die) (getMByteSize die) (getDecl die)
   (fromMaybe False (getMAttrVal DW_AT_declaration Dwarf.Lens.aTVAL_BOOL die))
   <$> mapM (parseMember getLoc) (dieChildren die)
   where
@@ -290,14 +295,16 @@ parseArrayType die =
 -- DW_AT_decl_file=(DW_ATVAL_UINT 6)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 96)
 data UnionType = UnionType
-  { unionByteSize :: Word
+  { unionName :: Maybe String
+  , unionByteSize :: Word
   , unionDecl :: Decl
   , unionMembers :: [Boxed (Member (Maybe DW_ATVAL))]
   } deriving (Eq, Ord, Show)
 
 parseUnionType :: DIE -> M UnionType
 parseUnionType die =
-  UnionType (getByteSize die) (getDecl die) <$> mapM (parseMember getLoc) (dieChildren die)
+  UnionType (getMName die) (getByteSize die) (getDecl die)
+  <$> mapM (parseMember getLoc) (dieChildren die)
   where
     getLoc = maybeAttr DW_AT_data_member_location
 
@@ -319,32 +326,34 @@ parseEnumerator die =
 -- DW_AT_decl_file=(DW_ATVAL_UINT 11)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 74)
 data EnumerationType = EnumerationType
-  { enumDecl :: Decl
+  { enumName :: Maybe String
+  , enumDecl :: Decl
   , enumByteSize :: Word
   , enumEnumerators :: [Boxed Enumerator]
   } deriving (Eq, Ord, Show)
 
 parseEnumerationType :: DIE -> M EnumerationType
 parseEnumerationType die =
-  EnumerationType (getDecl die) (getByteSize die)
+  EnumerationType (getMName die) (getDecl die) (getByteSize die)
   <$> mapM parseEnumerator (dieChildren die)
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 119))
 data FormalParameter = FormalParameter
-  { formalParamType :: TypeRef
+  { formalParamName :: Maybe String
+  , formalParamType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 parseFormalParameter :: DIE -> M (Boxed FormalParameter)
 parseFormalParameter die =
   box die <$>
   verifyTag DW_TAG_formal_parameter die .
-  FormalParameter <$> parseTypeRef die
+  FormalParameter (getMName die) <$> parseTypeRef die
 
 -- DW_AT_prototyped=(DW_ATVAL_BOOL True)
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
-  , subrType :: TypeRef
+  , subrRetType :: TypeRef
   , subrFormalParameters :: [Boxed FormalParameter]
   } deriving (Eq, Ord, Show)
 
@@ -375,7 +384,8 @@ getMHighPC = getMAttrVal DW_AT_high_pc Dwarf.Lens.aTVAL_UINT
 -- DW_AT_high_pc=(DW_ATVAL_UINT 135801563)
 -- DW_AT_frame_base=(DW_ATVAL_UINT 0)
 data Subprogram = Subprogram
-  { subprogDecl :: Decl
+  { subprogName :: String
+  , subprogDecl :: Decl
   , subprogPrototyped :: Bool
   , subprogLowPC :: Maybe Word64
   , subprogHighPC :: Maybe Word64
@@ -396,7 +406,7 @@ data SubprogramChild
 parseSubprogram :: DIE -> M Subprogram
 parseSubprogram die = do
   children <- mapM parseChild (dieChildren die)
-  Subprogram (getDecl die) (getPrototyped die)
+  Subprogram (getName die) (getDecl die) (getPrototyped die)
     (getMLowPC die) (getMHighPC die)
     (parseLoc die <$> maybeAttr DW_AT_frame_base die)
     [x | SubprogramChildFormalParameter x <- children]
@@ -512,6 +522,3 @@ parseCU dieMap die =
   (getLowPC die) (getMHighPC die)
   -- lineNumInfo
   <$> mapM parseDef (dieChildren die)
-  where
-    -- lineNumInfo = Dwarf.parseLNE endianess targetSize stmt_list $ dsDebugLine sections
-    -- stmt_list = getAttr DW_AT_stmt_list Dwarf.Lens.aTVAL_UINT
