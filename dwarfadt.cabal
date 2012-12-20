@@ -26,7 +26,7 @@ library
                      , Data.Dwarf.ADT.Pretty
                      , Data.Dwarf.Lens
   build-depends:       base >=4 && <5, elf >=0.27
-                     , bytestring-mmap >=0.2, dwarf >=0.23, lens >=3.7
+                     , bytestring-mmap >=0.2, dwarf-el >=0.1 && <0.2, lens >=3.7
                      , bytestring >=0.9, containers >= 0.3, transformers >= 0.3
                      , pretty >= 1.1
                      , TraceUtils
@@ -34,10 +34,10 @@ library
 
 executable dumpdwarf
   main-is:             dumpdwarf.hs
-  build-depends:       base >= 4 && < 5, dwarfadt, dwarf, containers
+  build-depends:       base >= 4 && < 5, dwarfadt, dwarf-el, containers
   ghc-options:         -Wall
 
 executable dumpadt
   main-is:             dumpadt.hs
-  build-depends:       base >= 4 && < 5, dwarfadt, dwarf
+  build-depends:       base >= 4 && < 5, dwarfadt, dwarf-el
   ghc-options:         -Wall
