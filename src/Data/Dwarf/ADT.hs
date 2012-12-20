@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Data.Dwarf.ADT
-  ( Sections(..), parseCU
+  ( parseCU
   , Boxed(..)
   , CompilationUnit(..)
   , Decl(..)
@@ -31,7 +31,6 @@ import Data.Traversable (traverse)
 import Data.Word (Word, Word64)
 import qualified Control.Monad.Trans.Reader as Reader
 import qualified Control.Monad.Trans.State as State
-import qualified Data.ByteString as BS
 import qualified Data.Dwarf as Dwarf
 import qualified Data.Dwarf.Lens as Dwarf.Lens
 import qualified Data.Map as Map
@@ -101,7 +100,7 @@ parseAt i = cachedMake i $ do
   let die = Dwarf.dieRefsDIE $ dieMap Map.! i
   parseDefI die
 
-data Loc = LocOp Dwarf.DW_OP | LocWord64 Word64
+data Loc = LocOp Dwarf.DW_OP | LocUINT Word64
   deriving (Eq, Ord, Show)
 
 -------------------
@@ -438,7 +437,7 @@ parseVariable getVarName die =
 
 parseLoc :: DIE -> DW_ATVAL -> Loc
 parseLoc die (DW_ATVAL_BLOB blob) = LocOp $ Dwarf.parseDW_OP (dieReader die) blob
-parseLoc _ (DW_ATVAL_UINT uint) = LocWord64 uint
+parseLoc _ (DW_ATVAL_UINT uint) = LocUINT uint
 parseLoc _ other =
   error $
   "Expected DW_ATVAL_BLOB or DW_ATVAL_UINT for DW_AT_location field of variable, got: " ++
@@ -500,14 +499,8 @@ data CompilationUnit = CompilationUnit
   , cuDefs :: [Boxed Def]
   } deriving (Show)
 
-newtype Sections = Sections
-  { dsDebugLine :: BS.ByteString
-  }
-
-parseCU ::
-  Dwarf.Endianess -> Dwarf.TargetSize -> Sections ->
-  DIEMap -> DIE -> Boxed CompilationUnit
-parseCU _endianess _targetSize _sections dieMap die =
+parseCU :: DIEMap -> DIE -> Boxed CompilationUnit
+parseCU dieMap die =
   runM dieMap $
   box die .
   verifyTag DW_TAG_compile_unit die .
