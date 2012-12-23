@@ -1,0 +1,10 @@
+* unifyDefs :: Dwarf -> [Def]
+
+  * Concat all the definitions inside all the compilation units,
+    unifying exactly equal ones, and prepending a compilation unit
+    name to avoid collisions on the non-equal ones.
+
+* This can later be used by an FFI package to generate the equivalent
+  Haskell-types for each of the structs, unions, enums, and typedefs
+  And the Binary and Storable instances
+  And the Haskell FFI function declarations for each of the functions
