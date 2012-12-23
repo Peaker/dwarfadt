@@ -1,8 +1,8 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, DeriveFunctor #-}
 module Data.Dwarf.ADT
-  ( parseCU, Warning(..)
-  , Boxed(..)
-  , CompilationUnit(..)
+  ( Warning(..)
+  , Dwarf(..), fromDies
+  , Boxed(..), CompilationUnit(..), fromDie
   , Decl(..)
   , Def(..), DefType(..)
   , TypeRef(..)
@@ -61,8 +61,8 @@ instance Show Warning where
 ---------- { Monad
 newtype M a = M (StateT (Map DieID (Boxed DefType)) (ReaderT DIEMap (Writer [Warning])) a)
   deriving (Functor, Applicative, Monad, MonadFix)
-runM :: DIEMap -> M a -> (a, [Warning])
-runM dieMap (M act) = runWriter $ runReaderT (evalStateT act Map.empty) dieMap
+runM :: DIEMap -> M a -> Writer [Warning] a
+runM dieMap (M act) = runReaderT (evalStateT act Map.empty) dieMap
 
 liftDefCache :: StateT (Map DieID (Boxed DefType)) (ReaderT DIEMap (Writer [Warning])) a -> M a
 liftDefCache = M
@@ -556,7 +556,7 @@ data CompilationUnit = CompilationUnit
   , cuDefs :: [Boxed Def]
   } deriving (Show)
 
-parseCU :: DIEMap -> DIE -> (Boxed CompilationUnit, [Warning])
+parseCU :: DIEMap -> DIE -> Writer [Warning] (Boxed CompilationUnit)
 parseCU dieMap die =
   runM dieMap .
   box DW_TAG_compile_unit die $
@@ -570,3 +570,13 @@ parseCU dieMap die =
   <*> AttrGetter.getAttr DW_AT_stmt_list aTVAL_UINT
   -- lineNumInfo
   <*> mapM (lift . parseDef) (dieChildren die)
+
+fromDie :: DIEMap -> DIE -> (Boxed CompilationUnit, [Warning])
+fromDie dieMap die = runWriter $ parseCU dieMap die
+
+newtype Dwarf = Dwarf
+  { dwarfCompilationUnits :: [Boxed CompilationUnit]
+  }
+
+fromDies :: DIEMap -> [DIE] -> (Dwarf, [Warning])
+fromDies dieMap dies = runWriter $ Dwarf <$> mapM (parseCU dieMap) dies

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Data.Dwarf.ADT.Pretty (compilationUnit) where
+module Data.Dwarf.ADT.Pretty (compilationUnit, dwarf) where
 
 import Data.Dwarf (DW_ATE(..))
 import Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
@@ -39,11 +39,14 @@ withName :: PP.Doc -> Maybe String -> PP.Doc
 withName prefix Nothing = prefix
 withName prefix (Just name) = prefix <> " " <> PP.text name
 
+indent :: PP.Doc -> PP.Doc
+indent x = "  " <> x
+
 compositeMembers :: PP.Doc -> Maybe String -> [Boxed (ADT.Member a)] -> PP.Doc
 compositeMembers prefix mName members =
   PP.vcat
   [ withName prefix mName <> " {"
-  , "  " <> PP.vcat (map memberPP members)
+  , indent $ PP.vcat (map memberPP members)
   , "}"
   ]
   where
@@ -69,7 +72,7 @@ enumerationType ADT.EnumerationType
   } =
   PP.vcat
   [ withName "enum" mName <> " {"
-  , "  " <> PP.vcat (map enumeratorPP enumerators)
+  , indent $ PP.vcat (map enumeratorPP enumerators)
   , "}"
   ]
   where
@@ -189,15 +192,21 @@ def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
 
 compilationUnit :: Boxed ADT.CompilationUnit -> PP.Doc
 compilationUnit
-  Boxed { bData = ADT.CompilationUnit producer language name compDir lowPc highPc _stmtList defs }
+  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc _stmtList defs))
   = PP.vcat
-    [ "producer = " <> showPP producer
-    , "language = " <> showPP language
-    , "name     = " <> showPP name
-    , "compDir  = " <> showPP compDir
-    , "lowPc    = " <> showPP lowPc
-    , "highPc   = " <> showPP highPc
-    , "defs     = "
-    , "  " <> PP.vcat (mapMaybe def defs)
-    , ""
+    [ "Compilation unit at " <> showPP i
+    , indent $ PP.vcat
+      [ "producer = " <> showPP producer
+      , "language = " <> showPP language
+      , "name     = " <> showPP name
+      , "compDir  = " <> showPP compDir
+      , "lowPc    = " <> showPP lowPc
+      , "highPc   = " <> showPP highPc
+      , "defs     = "
+      , "  " <> PP.vcat (mapMaybe def defs)
+      ]
     ]
+
+dwarf :: ADT.Dwarf -> PP.Doc
+dwarf (ADT.Dwarf compilationUnits) =
+  PP.vcat $ map compilationUnit compilationUnits
