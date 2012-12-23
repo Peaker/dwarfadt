@@ -1,10 +1,10 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, DeriveFunctor #-}
 module Data.Dwarf.ADT
   ( parseCU, Warning(..)
   , Boxed(..)
   , CompilationUnit(..)
   , Decl(..)
-  , Def(..)
+  , Def(..), DefType(..)
   , TypeRef(..)
   , BaseType(..)
   , Typedef(..)
@@ -17,9 +17,6 @@ module Data.Dwarf.ADT
   , Subprogram(..)
   , Variable(..)
   ) where
-
--- TODO: Separate ADT for type definitions, sum that with
--- subprogram/variable to get a CompilationUnitDef
 
 import Control.Applicative (Applicative(..), (<$>))
 import Control.Monad (when)
@@ -62,12 +59,12 @@ instance Show Warning where
     : map (\(key, val) -> show key ++ "=" ++ show val) unusedAttrs
 
 ---------- { Monad
-newtype M a = M (StateT (Map DieID (Boxed Def)) (ReaderT DIEMap (Writer [Warning])) a)
+newtype M a = M (StateT (Map DieID (Boxed DefType)) (ReaderT DIEMap (Writer [Warning])) a)
   deriving (Functor, Applicative, Monad, MonadFix)
 runM :: DIEMap -> M a -> (a, [Warning])
 runM dieMap (M act) = runWriter $ runReaderT (evalStateT act Map.empty) dieMap
 
-liftDefCache :: StateT (Map DieID (Boxed Def)) (ReaderT DIEMap (Writer [Warning])) a -> M a
+liftDefCache :: StateT (Map DieID (Boxed DefType)) (ReaderT DIEMap (Writer [Warning])) a -> M a
 liftDefCache = M
 
 askDIEMap :: M DIEMap
@@ -88,7 +85,7 @@ runAttrGetterT die act = do
   return res
 ---------- } Monad
 
-cachedMake :: DieID -> M (Boxed Def) -> M (Boxed Def)
+cachedMake :: DieID -> M (Boxed DefType) -> M (Boxed DefType)
 cachedMake i act = do
   found <- liftDefCache . State.gets $ Map.lookup i
   case found of
@@ -97,25 +94,25 @@ cachedMake i act = do
       liftDefCache . State.modify $ Map.insert i res
       act
 
-parseAt :: DieID -> M (Boxed Def)
+parseAt :: DieID -> M (Boxed DefType)
 parseAt i = cachedMake i $ do
   dieMap <- askDIEMap
   let die = Dwarf.dieRefsDIE $ dieMap Map.! i
-  parseDefI die
+  parseDefTypeI die
 
 data Loc = LocOp Dwarf.DW_OP | LocUINT Word64
   deriving (Eq, Ord, Show)
 
 -------------------
 
-data TypeRef = Void | TypeRef (Boxed Def)
+data TypeRef = Void | TypeRef (Boxed DefType)
   deriving (Eq, Ord)
 
 instance Show TypeRef where
   show Void = "void"
   show (TypeRef _) = "(..type..)"
 
-toTypeRef :: Maybe (Boxed Def) -> TypeRef
+toTypeRef :: Maybe (Boxed DefType) -> TypeRef
 toTypeRef Nothing = Void
 toTypeRef (Just x) = TypeRef x
 
@@ -150,7 +147,7 @@ getMByteSize = fmap fromIntegral <$> AttrGetter.findAttr DW_AT_byte_size aTVAL_U
 data Boxed a = Boxed
   { bDieId :: DieID
   , bData :: a
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord, Show, Functor)
 
 mkBox :: DIE -> AttrGetterT M a -> M (Boxed a)
 mkBox die act = Boxed (dieId die) <$> runAttrGetterT die act
@@ -490,7 +487,7 @@ parseSubprogram reader children = do
       DW_TAG_unspecified_parameters -> pure SubprogramChildUnspecifiedParameters
       _ -> error $ "unsupported child tag in child: " ++ show child
 
-data Def
+data DefType
   = DefBaseType BaseType
   | DefTypedef Typedef
   | DefPtrType PtrType
@@ -500,29 +497,45 @@ data Def
   | DefUnionType UnionType
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
+  deriving (Eq, Ord, Show)
+
+data Def
+  = DefType DefType
   | DefSubprogram Subprogram
   | DefVariable (Variable String)
   deriving (Eq, Ord, Show)
 
-parseDefI :: DIE -> M (Boxed Def)
-parseDefI die =
+parseDefTypeI :: DIE -> M (Boxed DefType)
+parseDefTypeI die =
   mkBox die $
   case dieTag die of
   DW_TAG_base_type        -> noChildren die $ DefBaseType  <$> parseBaseType
   DW_TAG_typedef          -> noChildren die $ DefTypedef   <$> parseTypedef
   DW_TAG_pointer_type     -> noChildren die $ DefPtrType   <$> parsePtrType
   DW_TAG_const_type       -> noChildren die $ DefConstType <$> parseConstType
-  DW_TAG_variable         -> noChildren die $ DefVariable  <$> parseVariable (dieReader die) getName
   DW_TAG_structure_type   -> DefStructureType   <$> parseStructureType (dieChildren die)
   DW_TAG_array_type       -> DefArrayType       <$> parseArrayType (dieChildren die)
   DW_TAG_union_type       -> DefUnionType       <$> parseUnionType (dieChildren die)
   DW_TAG_enumeration_type -> DefEnumerationType <$> parseEnumerationType (dieChildren die)
   DW_TAG_subroutine_type  -> DefSubroutineType  <$> parseSubroutineType (dieChildren die)
-  DW_TAG_subprogram       -> DefSubprogram      <$> parseSubprogram (dieReader die) (dieChildren die)
-  _ -> error $ "unsupported: " ++ show die
+  _ -> error $ "unsupported def type: " ++ show die
+
+parseDefI :: DIE -> M (Boxed Def)
+parseDefI die =
+  case dieTag die of
+  DW_TAG_variable ->
+    mkBox die . noChildren die $
+    DefVariable <$> parseVariable (dieReader die) getName
+  DW_TAG_subprogram ->
+    mkBox die $
+    DefSubprogram <$> parseSubprogram (dieReader die) (dieChildren die)
+  _ ->
+    (fmap . fmap) DefType .
+    cachedMake (dieId die) $
+    parseDefTypeI die
 
 parseDef :: DIE -> M (Boxed Def)
-parseDef die = cachedMake (dieId die) $ parseDefI die
+parseDef die = parseDefI die
 
 -- DW_AT_producer=(DW_ATVAL_STRING "GNU C 4.4.5")
 -- DW_AT_language=(DW_ATVAL_UINT 1)

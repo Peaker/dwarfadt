@@ -2,7 +2,7 @@
 module Data.Dwarf.ADT.Pretty (compilationUnit) where
 
 import Data.Dwarf (DW_ATE(..))
-import Data.Dwarf.ADT (Boxed(..), Def(..))
+import Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
 import Data.Maybe (mapMaybe)
 import Text.PrettyPrint ((<>))
 import qualified Data.Dwarf.ADT as ADT
@@ -136,7 +136,6 @@ ppType mName = result . recurseType
       DefSubroutineType ADT.SubroutineType
         { ADT.subrRetType = t, ADT.subrFormalParameters = params } ->
         annotate (simplePrecedence Postfix) (<> paramList params) $ recurseType t
-      _ -> error "Type contains non-types"
 
 defTypedef :: ADT.Typedef -> PP.Doc
 defTypedef (ADT.Typedef name _ typeRef) = "typedef " <> ppType (Just name) typeRef
@@ -169,9 +168,8 @@ defVariable :: (name -> Maybe String) -> ADT.Variable name -> PP.Doc
 defVariable f ADT.Variable
   { ADT.varName = name, ADT.varType = typeRef } = ppType (f name) typeRef
 
-def :: Boxed Def -> Maybe PP.Doc
-def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
-  case d of
+defType :: DefType -> Maybe PP.Doc
+defType t = case t of
   DefBaseType _        -> Nothing
   DefPtrType _         -> Nothing
   DefConstType _       -> Nothing
@@ -181,6 +179,11 @@ def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
   DefStructureType x   -> Just $ "StructureType: "   <> defStructureType x
   DefUnionType x       -> Just $ "UnionType: "       <> defUnionType x
   DefEnumerationType x -> Just $ "EnumerationType: " <> defEnumerationType x
+
+def :: Boxed Def -> Maybe PP.Doc
+def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
+  case d of
+  DefType t -> defType t
   DefSubprogram x      -> Just $ "Subprogram: "      <> defSubprogram x
   DefVariable x        -> Just $ "Variable: "        <> defVariable Just x
 
