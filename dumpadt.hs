@@ -8,4 +8,6 @@ main = do
   [filename] <- getArgs
   let endianess = Dwarf.LittleEndian
   cus <- Dwarf.Elf.parseElfDwarfADT endianess filename
-  print $ map Dwarf.ADT.Pretty.compilationUnit cus
+  let allWarnings = concatMap snd cus
+  mapM_ print allWarnings
+  print $ map (Dwarf.ADT.Pretty.compilationUnit . fst) cus

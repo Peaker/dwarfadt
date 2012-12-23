@@ -6,14 +6,13 @@ module Data.Dwarf.Lens
   , dW_ATVAL_STRING, aTVAL_STRING
   , dW_ATVAL_BLOB, aTVAL_BLOB
   , dW_ATVAL_BOOL, aTVAL_BOOL
-  , getATVal, ATVAL_NamedPrism
+  , ATVAL_NamedPrism
   ) where
 
-import Control.Lens (Getting, (^?))
+import Control.Lens (Getting)
 import Control.Lens.TH (makePrisms)
 import Data.Dwarf (DieID, DW_ATVAL)
 import Data.Int (Int64)
-import Data.Maybe (fromMaybe)
 import Data.Word (Word64)
 import qualified Data.ByteString as BS
 import qualified Data.Monoid as Monoid
@@ -41,9 +40,3 @@ aTVAL_BLOB = ("ATVAL_BLOB", dW_ATVAL_BLOB)
 
 aTVAL_BOOL :: ATVAL_NamedPrism Bool
 aTVAL_BOOL = ("ATVAL_BOOL", dW_ATVAL_BOOL)
-
-getATVal :: String -> ATVAL_NamedPrism a -> DW_ATVAL -> a
-getATVal prefix (typName, typ) atval =
-  fromMaybe (error msg) $ atval ^? typ
-  where
-    msg = concat [prefix, " is: ", show atval, " but expected: ", typName]
