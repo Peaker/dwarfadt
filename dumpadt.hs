@@ -6,7 +6,6 @@ import qualified Data.Dwarf.Elf as Dwarf.Elf
 main :: IO ()
 main = do
   [filename] <- getArgs
-  let endianess = Dwarf.LittleEndian
-  (dwarf, warnings) <- Dwarf.Elf.parseElfDwarfADT endianess filename
+  (dwarf, warnings) <- Dwarf.Elf.parseElfDwarfADT Dwarf.LittleEndian filename
   mapM_ print warnings
   print $ DwarfPretty.dwarf dwarf
