@@ -27,7 +27,7 @@ import Control.Monad.Trans.State (StateT, evalStateT)
 import Control.Monad.Trans.Writer (Writer, runWriter)
 import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..))
 import Data.Dwarf.AttrGetter (AttrGetterT)
-import Data.Dwarf.Lens (aTVAL_INT, aTVAL_UINT, aTVAL_REF, aTVAL_STRING, aTVAL_BLOB, aTVAL_BOOL)
+import Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BLOB, _ATVAL_BOOL)
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
@@ -42,10 +42,10 @@ import qualified Data.Dwarf.AttrGetter as AttrGetter
 import qualified Data.Map as Map
 
 getName :: Monad m => AttrGetterT m String
-getName = AttrGetter.getAttr DW_AT_name aTVAL_STRING
+getName = AttrGetter.getAttr DW_AT_name _ATVAL_STRING
 
 getMName :: Monad m => AttrGetterT m (Maybe String)
-getMName = AttrGetter.findAttr DW_AT_name aTVAL_STRING
+getMName = AttrGetter.findAttr DW_AT_name _ATVAL_STRING
 
 data Warning = Warning
   { warningDieId :: DIE
@@ -136,13 +136,13 @@ getDecl =
   <*> (fmap fromIntegral <$> getUINT DW_AT_decl_line)
   <*> (fmap fromIntegral <$> getUINT DW_AT_decl_column)
   where
-    getUINT = (`AttrGetter.findAttr` aTVAL_UINT)
+    getUINT = (`AttrGetter.findAttr` _ATVAL_UINT)
 
 getByteSize :: (Monad m, Applicative m) => AttrGetterT m Word
-getByteSize = fromIntegral <$> AttrGetter.getAttr DW_AT_byte_size aTVAL_UINT
+getByteSize = fromIntegral <$> AttrGetter.getAttr DW_AT_byte_size _ATVAL_UINT
 
 getMByteSize :: (Monad m, Applicative m) => AttrGetterT m (Maybe Word)
-getMByteSize = fmap fromIntegral <$> AttrGetter.findAttr DW_AT_byte_size aTVAL_UINT
+getMByteSize = fmap fromIntegral <$> AttrGetter.findAttr DW_AT_byte_size _ATVAL_UINT
 
 data Boxed a = Boxed
   { bDieId :: DieID
@@ -171,7 +171,7 @@ parseBaseType :: (Monad m, Applicative m) => AttrGetterT m BaseType
 parseBaseType =
   BaseType
   <$> getByteSize
-  <*> (Dwarf.dw_ate <$> AttrGetter.getAttr DW_AT_encoding aTVAL_UINT)
+  <*> (Dwarf.dw_ate <$> AttrGetter.getAttr DW_AT_encoding _ATVAL_UINT)
   <*> getMName
 
 -- DW_AT_name=(DW_ATVAL_STRING "ptrdiff_t")
@@ -190,7 +190,7 @@ instance Show Typedef where
 parseTypeRef :: AttrGetterT M TypeRef
 parseTypeRef =
   lift . fmap toTypeRef . traverse parseAt =<<
-  AttrGetter.findAttr DW_AT_type aTVAL_REF
+  AttrGetter.findAttr DW_AT_type _ATVAL_REF
 
 parseTypedef :: AttrGetterT M Typedef
 parseTypedef =
@@ -248,7 +248,7 @@ data StructureType = StructureType
   } deriving (Eq, Ord, Show)
 
 getDeclaration :: AttrGetterT M Bool
-getDeclaration = fromMaybe False <$> AttrGetter.findAttr DW_AT_declaration aTVAL_BOOL
+getDeclaration = fromMaybe False <$> AttrGetter.findAttr DW_AT_declaration _ATVAL_BOOL
 
 parseStructureType :: [DIE] -> AttrGetterT M StructureType
 parseStructureType children =
@@ -261,7 +261,7 @@ parseStructureType children =
   where
     getLoc reader =
       Dwarf.parseDW_OP reader <$>
-      AttrGetter.getAttr DW_AT_data_member_location aTVAL_BLOB
+      AttrGetter.getAttr DW_AT_data_member_location _ATVAL_BLOB
   -- TODO: Parse the member_location, It's a blob with a DWARF program..
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 101))
@@ -275,7 +275,7 @@ parseSubrangeType :: DIE -> M (Boxed SubrangeType)
 parseSubrangeType die =
   box DW_TAG_subrange_type die $
   SubrangeType
-  <$> (fromIntegral <$> AttrGetter.getAttr DW_AT_upper_bound aTVAL_UINT)
+  <$> (fromIntegral <$> AttrGetter.getAttr DW_AT_upper_bound _ATVAL_UINT)
   <*> parseTypeRef
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
@@ -311,7 +311,7 @@ parseUnionType children =
   where
     getLoc reader =
       fmap (Dwarf.parseDW_OP reader) <$>
-      AttrGetter.findAttr DW_AT_data_member_location aTVAL_BLOB
+      AttrGetter.findAttr DW_AT_data_member_location _ATVAL_BLOB
 
 -- DW_AT_name=(DW_ATVAL_STRING "_SC_ARG_MAX")
 -- DW_AT_const_value=(DW_ATVAL_INT 0)
@@ -325,7 +325,7 @@ parseEnumerator die =
   box DW_TAG_enumerator die $
   Enumerator
   <$> getName
-  <*> AttrGetter.getAttr DW_AT_const_value aTVAL_INT
+  <*> AttrGetter.getAttr DW_AT_const_value _ATVAL_INT
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_decl_file=(DW_ATVAL_UINT 11)
@@ -379,7 +379,7 @@ data SubroutineType = SubroutineType
   } deriving (Eq, Ord, Show)
 
 getPrototyped :: AttrGetterT M Bool
-getPrototyped = fromMaybe False <$> AttrGetter.findAttr DW_AT_prototyped aTVAL_BOOL
+getPrototyped = fromMaybe False <$> AttrGetter.findAttr DW_AT_prototyped _ATVAL_BOOL
 
 parseSubroutineType :: [DIE] -> AttrGetterT M SubroutineType
 parseSubroutineType children =
@@ -389,13 +389,13 @@ parseSubroutineType children =
   <*> mapM (lift . parseFormalParameter) children
 
 getLowPC :: AttrGetterT M Word64
-getLowPC = AttrGetter.getAttr DW_AT_low_pc aTVAL_UINT
+getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
 
 getMLowPC :: AttrGetterT M (Maybe Word64)
-getMLowPC = AttrGetter.findAttr DW_AT_low_pc aTVAL_UINT
+getMLowPC = AttrGetter.findAttr DW_AT_low_pc _ATVAL_UINT
 
 getMHighPC :: AttrGetterT M (Maybe Word64)
-getMHighPC = AttrGetter.findAttr DW_AT_high_pc aTVAL_UINT
+getMHighPC = AttrGetter.findAttr DW_AT_high_pc _ATVAL_UINT
 
 -- DW_AT_name=(DW_ATVAL_STRING "sfs")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
@@ -455,7 +455,7 @@ noChildren     DIE{dieChildren=[]} = id
 noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
 
 getExternal :: AttrGetterT M Bool
-getExternal = fromMaybe False <$> AttrGetter.findAttr DW_AT_external aTVAL_BOOL
+getExternal = fromMaybe False <$> AttrGetter.findAttr DW_AT_external _ATVAL_BOOL
 
 parseSubprogram :: Dwarf.Reader -> [DIE] -> AttrGetterT M Subprogram
 parseSubprogram reader children = do
@@ -561,13 +561,13 @@ parseCU dieMap die =
   runM dieMap .
   box DW_TAG_compile_unit die $
   CompilationUnit
-  <$> AttrGetter.getAttr DW_AT_producer aTVAL_STRING
-  <*> (Dwarf.dw_lang <$> AttrGetter.getAttr DW_AT_language aTVAL_UINT)
+  <$> AttrGetter.getAttr DW_AT_producer _ATVAL_STRING
+  <*> (Dwarf.dw_lang <$> AttrGetter.getAttr DW_AT_language _ATVAL_UINT)
   <*> getName
-  <*> AttrGetter.getAttr DW_AT_comp_dir aTVAL_STRING
+  <*> AttrGetter.getAttr DW_AT_comp_dir _ATVAL_STRING
   <*> getLowPC
   <*> getMHighPC
-  <*> AttrGetter.getAttr DW_AT_stmt_list aTVAL_UINT
+  <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
   -- lineNumInfo
   <*> mapM (lift . parseDef) (dieChildren die)
 

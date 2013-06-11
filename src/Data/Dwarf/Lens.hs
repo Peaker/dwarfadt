@@ -1,11 +1,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 module Data.Dwarf.Lens
-  ( dW_ATVAL_INT, aTVAL_INT
-  , dW_ATVAL_UINT, aTVAL_UINT
-  , dW_ATVAL_REF, aTVAL_REF
-  , dW_ATVAL_STRING, aTVAL_STRING
-  , dW_ATVAL_BLOB, aTVAL_BLOB
-  , dW_ATVAL_BOOL, aTVAL_BOOL
+  ( _DW_ATVAL_INT, _ATVAL_INT
+  , _DW_ATVAL_UINT, _ATVAL_UINT
+  , _DW_ATVAL_REF, _ATVAL_REF
+  , _DW_ATVAL_STRING, _ATVAL_STRING
+  , _DW_ATVAL_BLOB, _ATVAL_BLOB
+  , _DW_ATVAL_BOOL, _ATVAL_BOOL
   , ATVAL_NamedPrism
   ) where
 
@@ -19,24 +19,24 @@ import qualified Data.Monoid as Monoid
 
 {-# ANN module "HLint: ignore Use camelCase" #-}
 
-type ATVAL_NamedPrism a = (String, Getting (Monoid.First a) DW_ATVAL DW_ATVAL a a)
+type ATVAL_NamedPrism a = (String, Getting (Monoid.First a) DW_ATVAL a)
 
 makePrisms ''DW_ATVAL
 
-aTVAL_INT :: ATVAL_NamedPrism Int64
-aTVAL_INT = ("ATVAL_INT", dW_ATVAL_INT)
+_ATVAL_INT :: ATVAL_NamedPrism Int64
+_ATVAL_INT = ("ATVAL_INT", _DW_ATVAL_INT)
 
-aTVAL_UINT :: ATVAL_NamedPrism Word64
-aTVAL_UINT = ("ATVAL_UINT", dW_ATVAL_UINT)
+_ATVAL_UINT :: ATVAL_NamedPrism Word64
+_ATVAL_UINT = ("ATVAL_UINT", _DW_ATVAL_UINT)
 
-aTVAL_REF :: ATVAL_NamedPrism DieID
-aTVAL_REF = ("ATVAL_REF", dW_ATVAL_REF)
+_ATVAL_REF :: ATVAL_NamedPrism DieID
+_ATVAL_REF = ("ATVAL_REF", _DW_ATVAL_REF)
 
-aTVAL_STRING :: ATVAL_NamedPrism String
-aTVAL_STRING = ("ATVAL_STRING", dW_ATVAL_STRING)
+_ATVAL_STRING :: ATVAL_NamedPrism String
+_ATVAL_STRING = ("ATVAL_STRING", _DW_ATVAL_STRING)
 
-aTVAL_BLOB :: ATVAL_NamedPrism BS.ByteString
-aTVAL_BLOB = ("ATVAL_BLOB", dW_ATVAL_BLOB)
+_ATVAL_BLOB :: ATVAL_NamedPrism BS.ByteString
+_ATVAL_BLOB = ("ATVAL_BLOB", _DW_ATVAL_BLOB)
 
-aTVAL_BOOL :: ATVAL_NamedPrism Bool
-aTVAL_BOOL = ("ATVAL_BOOL", dW_ATVAL_BOOL)
+_ATVAL_BOOL :: ATVAL_NamedPrism Bool
+_ATVAL_BOOL = ("ATVAL_BOOL", _DW_ATVAL_BOOL)
