@@ -110,7 +110,7 @@ ppType mName = result . recurseType
         innerPrecedence = onPrecedence outerPrecedence
     annotate onPrecedence f (btn, decl) = (btn, addAnnotation onPrecedence f decl)
     mkBaseType name = (name, const ($ ""))
-    subRange ADT.SubrangeType { ADT.subRangeUpperBound = u } = "[" <> showPP u <> "]"
+    subRange ADT.SubrangeType { ADT.subRangeUpperBound = u } = "[" <> maybe "" showPP u <> "]"
     simplePrecedence = const . Just
     recurseType ADT.Void = mkBaseType "void"
     recurseType (ADT.TypeRef Boxed { bData = typ }) =
@@ -134,6 +134,8 @@ ppType mName = result . recurseType
         annotate (simplePrecedence Prefix) ("*" <>) $ recurseType t
       DefConstType ADT.ConstType { ADT.ctType = t } ->
         annotate id ("const " <>) $ recurseType t
+      DefVolatileType ADT.VolatileType { ADT.vtType = t } ->
+        annotate id ("volatile " <>) $ recurseType t
       DefArrayType ADT.ArrayType { ADT.atType = t, ADT.atSubrangeType = r } ->
         annotate (simplePrecedence Postfix) (<> subRange (bData r)) $ recurseType t
       DefSubroutineType ADT.SubroutineType
@@ -176,6 +178,7 @@ defType t = case t of
   DefBaseType _        -> Nothing
   DefPtrType _         -> Nothing
   DefConstType _       -> Nothing
+  DefVolatileType _    -> Nothing
   DefArrayType _       -> Nothing
   DefSubroutineType _  -> Nothing
   DefTypedef x         -> Just $ "Typedef: "         <> defTypedef x
@@ -186,7 +189,7 @@ defType t = case t of
 def :: Boxed Def -> Maybe PP.Doc
 def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
   case d of
-  DefType t -> defType t
+  DefType t            -> defType t
   DefSubprogram x      -> Just $ "Subprogram: "      <> defSubprogram x
   DefVariable x        -> Just $ "Variable: "        <> defVariable Just x
 

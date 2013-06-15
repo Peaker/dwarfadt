@@ -10,6 +10,7 @@ module Data.Dwarf.ADT
   , Typedef(..)
   , PtrType(..)
   , ConstType(..)
+  , VolatileType(..)
   , Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
   , EnumerationType(..), Enumerator(..)
@@ -218,6 +219,14 @@ data ConstType = ConstType
 parseConstType :: AttrGetterT M ConstType
 parseConstType = ConstType <$> parseTypeRef
 
+-- See ConstType
+data VolatileType = VolatileType
+  { vtType :: TypeRef
+  } deriving (Eq, Ord, Show)
+
+parseVolatileType :: AttrGetterT M VolatileType
+parseVolatileType = VolatileType <$> parseTypeRef
+
 -- DW_AT_name=(DW_ATVAL_STRING "__val")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 4)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 144)
@@ -267,7 +276,7 @@ parseStructureType children =
 -- DW_AT_type=(DW_ATVAL_REF (DieID 101))
 -- DW_AT_upper_bound=(DW_ATVAL_UINT 1)
 data SubrangeType = SubrangeType
-  { subRangeUpperBound :: Word
+  { subRangeUpperBound :: Maybe Word
   , subRangeType :: TypeRef
   } deriving (Eq, Ord, Show)
 
@@ -275,7 +284,7 @@ parseSubrangeType :: DIE -> M (Boxed SubrangeType)
 parseSubrangeType die =
   box DW_TAG_subrange_type die $
   SubrangeType
-  <$> (fromIntegral <$> AttrGetter.getAttr DW_AT_upper_bound _ATVAL_UINT)
+  <$> (fmap fromIntegral <$> AttrGetter.findAttr DW_AT_upper_bound _ATVAL_UINT)
   <*> parseTypeRef
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
@@ -485,6 +494,8 @@ parseSubprogram reader children = do
       DW_TAG_inlined_subroutine -> pure SubprogramChildIgnored
       DW_TAG_user 137 -> pure SubprogramChildIgnored -- GNU extensions, safe to ignore here
       DW_TAG_unspecified_parameters -> pure SubprogramChildUnspecifiedParameters
+      DW_TAG_structure_type -> pure SubprogramChildIgnored
+      DW_TAG_union_type -> pure SubprogramChildIgnored
       _ -> error $ "unsupported child tag in child: " ++ show child
 
 data DefType
@@ -492,6 +503,7 @@ data DefType
   | DefTypedef Typedef
   | DefPtrType PtrType
   | DefConstType ConstType
+  | DefVolatileType VolatileType
   | DefStructureType StructureType
   | DefArrayType ArrayType
   | DefUnionType UnionType
@@ -509,10 +521,11 @@ parseDefTypeI :: DIE -> M (Boxed DefType)
 parseDefTypeI die =
   mkBox die $
   case dieTag die of
-  DW_TAG_base_type        -> noChildren die $ DefBaseType  <$> parseBaseType
-  DW_TAG_typedef          -> noChildren die $ DefTypedef   <$> parseTypedef
-  DW_TAG_pointer_type     -> noChildren die $ DefPtrType   <$> parsePtrType
-  DW_TAG_const_type       -> noChildren die $ DefConstType <$> parseConstType
+  DW_TAG_base_type        -> noChildren die $ DefBaseType     <$> parseBaseType
+  DW_TAG_typedef          -> noChildren die $ DefTypedef      <$> parseTypedef
+  DW_TAG_pointer_type     -> noChildren die $ DefPtrType      <$> parsePtrType
+  DW_TAG_const_type       -> noChildren die $ DefConstType    <$> parseConstType
+  DW_TAG_volatile_type    -> noChildren die $ DefVolatileType <$> parseVolatileType
   DW_TAG_structure_type   -> DefStructureType   <$> parseStructureType (dieChildren die)
   DW_TAG_array_type       -> DefArrayType       <$> parseArrayType (dieChildren die)
   DW_TAG_union_type       -> DefUnionType       <$> parseUnionType (dieChildren die)
