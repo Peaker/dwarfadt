@@ -1,3 +1,5 @@
+* Remove abuse of Show instances, use a CShow class or such for C formatting
+
 * unifyDefs :: Dwarf -> [Def]
 
   * Concat all the definitions inside all the compilation units,
