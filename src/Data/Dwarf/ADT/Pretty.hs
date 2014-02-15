@@ -136,8 +136,11 @@ ppType mName = result . recurseType
         annotate id ("const " <>) $ recurseType t
       DefVolatileType ADT.VolatileType { ADT.vtType = t } ->
         annotate id ("volatile " <>) $ recurseType t
-      DefArrayType ADT.ArrayType { ADT.atType = t, ADT.atSubrangeType = r } ->
+      DefArrayType ADT.ArrayType { ADT.atType = t, ADT.atSubrangeType = [r] } ->
         annotate (simplePrecedence Postfix) (<> subRange (bData r)) $ recurseType t
+      DefArrayType ADT.ArrayType { ADT.atType = t, ADT.atSubrangeType = r } ->
+        annotate (simplePrecedence Postfix) (<> PP.parens
+                  (PP.hcat $ PP.punctuate PP.comma (map (subRange . bData) r))) $ recurseType t
       DefSubroutineType ADT.SubroutineType
         { ADT.subrRetType = t, ADT.subrFormalParameters = params } ->
         annotate (simplePrecedence Postfix) (<> paramList params) $ recurseType t

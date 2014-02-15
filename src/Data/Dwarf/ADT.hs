@@ -289,14 +289,13 @@ parseSubrangeType die =
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
 data ArrayType = ArrayType
-  { atSubrangeType :: Boxed SubrangeType
+  { atSubrangeType :: [Boxed SubrangeType]
   , atType :: TypeRef
   } deriving (Eq, Ord, Show)
 
 parseArrayType :: [DIE] -> AttrGetterT M ArrayType
-parseArrayType [child] =
-  ArrayType <$> lift (parseSubrangeType child) <*> parseTypeRef
-parseArrayType cs = error $ "Array must have exactly one child, not: " ++ show cs
+parseArrayType cs =
+  ArrayType <$> lift (mapM parseSubrangeType cs) <*> parseTypeRef
 
 ----------------
 
