@@ -20,6 +20,8 @@ module Data.Dwarf.ADT
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
+import Control.Lens (_1)
+import Control.Lens.Operators
 import Control.Monad (when)
 import Control.Monad.Fix (MonadFix, mfix)
 import Control.Monad.Trans.Class (lift)
@@ -383,18 +385,28 @@ parseFormalParameter die =
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
   , subrRetType :: TypeRef
+    -- TODO: Reduce duplication with subprogram formal params
   , subrFormalParameters :: [Boxed FormalParameter]
+  , subrHaveUnspecified :: Bool
   } deriving (Eq, Ord, Show)
 
 getPrototyped :: AttrGetterT M Bool
 getPrototyped = fromMaybe False <$> AttrGetter.findAttr DW_AT_prototyped _ATVAL_BOOL
 
 parseSubroutineType :: [DIE] -> AttrGetterT M SubroutineType
-parseSubroutineType children =
+parseSubroutineType children = do
+  (params, haveUnspecified) <- lift (parseParameters children)
   SubroutineType
-  <$> getPrototyped
-  <*> parseTypeRef
-  <*> mapM (lift . parseFormalParameter) children
+    <$> getPrototyped
+    <*> parseTypeRef
+    <*> pure params
+    <*> pure haveUnspecified
+  where
+    parseParameters [] = pure ([], False)
+    parseParameters [die] | dieTag die == DW_TAG_unspecified_parameters = pure ([], True)
+    parseParameters (die:dies) = do
+      param <- parseFormalParameter die
+      parseParameters dies <&> _1 %~ (param :)
 
 getLowPC :: AttrGetterT M Word64
 getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
