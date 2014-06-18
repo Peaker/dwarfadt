@@ -7,6 +7,7 @@ module Data.Dwarf.ADT
   , Def(..), DefType(..)
   , TypeRef(..)
   , BaseType(..)
+  , Loc(..)
   , Typedef(..)
   , PtrType(..)
   , ConstType(..)
