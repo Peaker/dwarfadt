@@ -168,7 +168,7 @@ defSubprogram ADT.Subprogram
   , ADT.subprogUnspecifiedParameters = unspec
   } =
   PP.hcat
-  [ ppType (Just name) typ, paramList params unspec
+  [ ppType name typ, paramList params unspec
   , " at (", m lowPC, ":", m highPC, ")"
   ]
   where
@@ -200,7 +200,7 @@ def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
 
 compilationUnit :: Boxed ADT.CompilationUnit -> PP.Doc
 compilationUnit
-  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc _stmtList defs))
+  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc ranges _stmtList defs))
   = PP.vcat
     [ "Compilation unit at " <> showPP i
     , indent $ PP.vcat
@@ -210,6 +210,7 @@ compilationUnit
       , "compDir  = " <> showPP compDir
       , "lowPc    = " <> showPP lowPc
       , "highPc   = " <> showPP highPc
+      , "ranges   = " <> showPP ranges
       , "defs     = "
       , "  " <> PP.vcat (mapMaybe def defs)
       ]

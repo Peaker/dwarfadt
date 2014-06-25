@@ -16,6 +16,7 @@ module Data.Dwarf.ADT
   , SubrangeType(..), ArrayType(..)
   , EnumerationType(..), Enumerator(..)
   , SubroutineType(..), FormalParameter(..)
+  , InlineType(..)
   , Subprogram(..)
   , Variable(..)
   ) where
@@ -35,7 +36,7 @@ import Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATV
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, maybeToList)
+import Data.Maybe (maybeToList)
 import Data.Traversable (traverse)
 import Data.Word (Word, Word64)
 import qualified Control.Monad.Trans.Reader as Reader
@@ -240,12 +241,22 @@ data Member loc = Member
   , membDecl :: Decl
   , membLoc :: loc
   , membType :: TypeRef
+  , membByteSize :: Maybe Word64
+  , membBitSize :: Maybe Word64
+  , membBitOffset :: Maybe Word64
   } deriving (Eq, Ord, Show)
 
 parseMember :: (Dwarf.Reader -> AttrGetterT M loc) -> DIE -> M (Boxed (Member loc))
 parseMember getLoc die =
   box DW_TAG_member die $
-  Member <$> getMName <*> getDecl <*> getLoc (dieReader die) <*> parseTypeRef
+  Member
+  <$> getMName
+  <*> getDecl
+  <*> getLoc (dieReader die)
+  <*> parseTypeRef
+  <*> AttrGetter.findAttr DW_AT_byte_size _ATVAL_UINT
+  <*> AttrGetter.findAttr DW_AT_bit_size _ATVAL_UINT
+  <*> AttrGetter.findAttr DW_AT_bit_offset _ATVAL_UINT
 
 -- DW_AT_name=(DW_ATVAL_STRING "__pthread_mutex_s")
 -- DW_AT_byte_size=(DW_ATVAL_UINT 24)
@@ -259,8 +270,8 @@ data StructureType = StructureType
   , stMembers :: [Boxed (Member Dwarf.DW_OP)]
   } deriving (Eq, Ord, Show)
 
-getDeclaration :: AttrGetterT M Bool
-getDeclaration = fromMaybe False <$> AttrGetter.findAttr DW_AT_declaration _ATVAL_BOOL
+flag :: DW_AT -> AttrGetterT M Bool
+flag atId = ((Just True ==) <$> AttrGetter.findAttr atId _ATVAL_BOOL)
 
 parseStructureType :: [DIE] -> AttrGetterT M StructureType
 parseStructureType children =
@@ -268,7 +279,7 @@ parseStructureType children =
   <$> getMName
   <*> getMByteSize
   <*> getDecl
-  <*> getDeclaration
+  <*> flag DW_AT_declaration
   <*> mapM (lift . parseMember getLoc) children
   where
     getLoc reader =
@@ -374,12 +385,14 @@ parseLoc _ x =
 
 parseFormalParameter :: DIE -> M (Boxed FormalParameter)
 parseFormalParameter die =
-  box DW_TAG_formal_parameter die $
-  FormalParameter
-  <$> getMName
-  <*> getDecl
-  <*> (fmap (parseLoc (dieReader die)) <$> AttrGetter.findAttrVal DW_AT_location)
-  <*> parseTypeRef
+  box DW_TAG_formal_parameter die $ do
+    -- for now, ignore abstract origins
+    _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
+    FormalParameter
+      <$> getMName
+      <*> getDecl
+      <*> (fmap (parseLoc (dieReader die)) <$> AttrGetter.findAttrVal DW_AT_location)
+      <*> parseTypeRef
 
 -- DW_AT_prototyped=(DW_ATVAL_BOOL True)
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))
@@ -391,14 +404,11 @@ data SubroutineType = SubroutineType
   , subrHaveUnspecified :: Bool
   } deriving (Eq, Ord, Show)
 
-getPrototyped :: AttrGetterT M Bool
-getPrototyped = fromMaybe False <$> AttrGetter.findAttr DW_AT_prototyped _ATVAL_BOOL
-
 parseSubroutineType :: [DIE] -> AttrGetterT M SubroutineType
 parseSubroutineType children = do
   (params, haveUnspecified) <- lift (parseParameters children)
   SubroutineType
-    <$> getPrototyped
+    <$> flag DW_AT_prototyped
     <*> parseTypeRef
     <*> pure params
     <*> pure haveUnspecified
@@ -418,6 +428,22 @@ getMLowPC = AttrGetter.findAttr DW_AT_low_pc _ATVAL_UINT
 getMHighPC :: AttrGetterT M (Maybe Word64)
 getMHighPC = AttrGetter.findAttr DW_AT_high_pc _ATVAL_UINT
 
+data InlineType = InlineType
+  { inlineRequested :: Bool
+  , inlineHappened :: Bool
+  } deriving (Eq, Ord, Show)
+
+parseInlineType :: Word64 -> InlineType
+parseInlineType 0 = InlineType False False
+parseInlineType 1 = InlineType False True
+parseInlineType 2 = InlineType True False
+parseInlineType 3 = InlineType True True
+parseInlineType n = error $ "Unknown inline type: " ++ show n
+
+getInlineType :: AttrGetterT M (Maybe InlineType)
+getInlineType =
+  fmap parseInlineType <$> AttrGetter.findAttr DW_AT_inline _ATVAL_UINT
+
 -- DW_AT_name=(DW_ATVAL_STRING "sfs")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 1)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 135)
@@ -429,29 +455,27 @@ data Variable name = Variable
   , varLoc :: Maybe Loc
   , varExternal :: Bool
   , varDeclaration :: Bool
+  , varArtificial :: Bool
   , varType :: TypeRef
+  , varConstVal :: Maybe Word64
   } deriving (Eq, Ord, Show)
 
 parseVariable :: Dwarf.Reader -> AttrGetterT M name -> AttrGetterT M (Variable name)
-parseVariable reader getVarName =
+parseVariable reader getVarName = do
+  -- for now, ignore abstract origins
+  _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
   Variable
-  <$> getVarName
-  <*> getDecl
-  <*> (fmap (parseLoc reader) <$> AttrGetter.findAttrVal DW_AT_location)
-  <*> getExternal
-  <*> getDeclaration
-  <*> parseTypeRef
+    <$> getVarName
+    <*> getDecl
+    <*> (fmap (parseLoc reader) <$> AttrGetter.findAttrVal DW_AT_location)
+    <*> flag DW_AT_external
+    <*> flag DW_AT_declaration
+    <*> flag DW_AT_artificial
+    <*> parseTypeRef
+    <*> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
 
--- DW_AT_name=(DW_ATVAL_STRING "selinux_enabled_check")
--- DW_AT_decl_file=(DW_ATVAL_UINT 1)
--- DW_AT_decl_line=(DW_ATVAL_UINT 133)
--- DW_AT_prototyped=(DW_ATVAL_BOOL True)
--- DW_AT_type=(DW_ATVAL_REF (DieID 62))
--- DW_AT_low_pc=(DW_ATVAL_UINT 135801260)
--- DW_AT_high_pc=(DW_ATVAL_UINT 135801563)
--- DW_AT_frame_base=(DW_ATVAL_UINT 0)
 data Subprogram = Subprogram
-  { subprogName :: String
+  { subprogName :: Maybe String -- abstract-origin subprograms are anonymous
   , subprogDecl :: Decl
   , subprogPrototyped :: Bool
   , subprogExternal :: Bool
@@ -462,6 +486,10 @@ data Subprogram = Subprogram
   , subprogUnspecifiedParameters :: Bool
   , subprogVariables :: [Boxed (Variable (Maybe String))]
   , subprogType :: TypeRef
+  , subprogInline :: Maybe InlineType
+  , subprogDeclaration :: Bool
+  , subprogArtificial :: Bool
+  , subprogLinkageName :: Maybe String
   } deriving (Eq, Ord, Show)
 
 data SubprogramChild
@@ -475,17 +503,18 @@ noChildren :: DIE -> a -> a
 noChildren     DIE{dieChildren=[]} = id
 noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
 
-getExternal :: AttrGetterT M Bool
-getExternal = fromMaybe False <$> AttrGetter.findAttr DW_AT_external _ATVAL_BOOL
-
 parseSubprogram :: Dwarf.Reader -> [DIE] -> AttrGetterT M Subprogram
 parseSubprogram reader children = do
   parsedChildren <- mapM (lift . parseChild) children
+  -- for now, ignore abstract origins & GNU extended attr for now
+  _ <- AttrGetter.findAttrVal $ DW_AT_user 0x2117
+  _ <- AttrGetter.findAttrVal $ DW_AT_user 0x2116
+  _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
   Subprogram
-    <$> getName
+    <$> getMName
     <*> getDecl
-    <*> getPrototyped
-    <*> getExternal
+    <*> flag DW_AT_prototyped
+    <*> flag DW_AT_external
     <*> getMLowPC
     <*> getMHighPC
     <*> (fmap (parseLoc reader) <$> AttrGetter.findAttrVal DW_AT_frame_base)
@@ -493,6 +522,10 @@ parseSubprogram reader children = do
     <*> pure (SubprogramChildUnspecifiedParameters `elem` parsedChildren)
     <*> pure [x | SubprogramChildVariable x <- parsedChildren]
     <*> parseTypeRef
+    <*> getInlineType
+    <*> flag DW_AT_declaration
+    <*> flag DW_AT_artificial
+    <*> AttrGetter.findAttr DW_AT_linkage_name _ATVAL_STRING
   where
     parseChild child =
       case dieTag child of
@@ -545,8 +578,8 @@ parseDefTypeI die =
   DW_TAG_subroutine_type  -> DefSubroutineType  <$> parseSubroutineType (dieChildren die)
   _ -> error $ "unsupported def type: " ++ show die
 
-parseDefI :: DIE -> M (Boxed Def)
-parseDefI die =
+parseDef :: DIE -> M (Boxed Def)
+parseDef die =
   case dieTag die of
   DW_TAG_variable ->
     mkBox die . noChildren die $
@@ -558,9 +591,6 @@ parseDefI die =
     (fmap . fmap) DefType .
     cachedMake (dieId die) $
     parseDefTypeI die
-
-parseDef :: DIE -> M (Boxed Def)
-parseDef die = parseDefI die
 
 -- DW_AT_producer=(DW_ATVAL_STRING "GNU C 4.4.5")
 -- DW_AT_language=(DW_ATVAL_UINT 1)
@@ -576,6 +606,7 @@ data CompilationUnit = CompilationUnit
   , cuCompDir :: String
   , cuLowPc :: Word64
   , cuHighPc :: Maybe Word64
+  , cuMRanges :: Maybe Word64
   , cuStmtList :: Word64 -- TODO: Parse this further
 --  , cuLineNumInfo :: ([String], [Dwarf.DW_LNE])
   , cuDefs :: [Boxed Def]
@@ -592,6 +623,7 @@ parseCU dieMap die =
   <*> AttrGetter.getAttr DW_AT_comp_dir _ATVAL_STRING
   <*> getLowPC
   <*> getMHighPC
+  <*> AttrGetter.findAttr DW_AT_ranges _ATVAL_UINT
   <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
   -- lineNumInfo
   <*> mapM (lift . parseDef) (dieChildren die)
