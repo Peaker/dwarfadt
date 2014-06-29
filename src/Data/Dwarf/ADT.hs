@@ -12,18 +12,22 @@ module Data.Dwarf.ADT
   , PtrType(..)
   , ConstType(..)
   , VolatileType(..)
+  , FormalParameters(..)
   , Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
   , EnumerationType(..), Enumerator(..)
   , SubroutineType(..), FormalParameter(..)
   , InlineType(..)
+  , InlinedSubroutine(..)
+  , LexicalBlock(..)
   , Subprogram(..)
   , Variable(..)
   ) where
 
 import Control.Applicative (Applicative(..), (<$>))
-import Control.Lens (_1)
+import Control.Lens (Lens')
 import Control.Lens.Operators
+import Control.Lens.Tuple
 import Control.Monad (when)
 import Control.Monad.Fix (MonadFix, mfix)
 import Control.Monad.Trans.Class (lift)
@@ -390,6 +394,7 @@ data FormalParameter = FormalParameter
   , formalParamDecl :: Decl
   , formalParamLocation :: Maybe Loc
   , formalParamType :: TypeRef
+  , formalParamConstVal :: Maybe Word64
   } deriving (Eq, Ord, Show)
 
 parseLoc :: Dwarf.Reader -> DW_ATVAL -> Loc
@@ -410,40 +415,64 @@ parseFormalParameter die =
       <*> getDecl
       <*> (fmap (parseLoc (dieReader die)) <$> AttrGetter.findAttrVal DW_AT_location)
       <*> parseTypeRef
+      <*> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
 
--- DW_AT_prototyped=(DW_ATVAL_BOOL True)
--- DW_AT_type=(DW_ATVAL_REF (DieID 62))
+data FormalParameters = FormalParameters
+  { formalParameters :: [Boxed FormalParameter]
+  , formalParametersHasUnspecified :: Bool
+  } deriving (Eq, Ord, Show)
+
+formalParametersLens :: Lens' FormalParameters [Boxed FormalParameter]
+formalParametersLens f (FormalParameters pars unspec) = (`FormalParameters` unspec) <$> f pars
+
+parseFormalParameters :: [DIE] -> M (FormalParameters, [DIE])
+parseFormalParameters = go
+  where
+    go dies =
+      case dies of
+      [] -> pure (FormalParameters [] False, [])
+      (die:rest)
+        | dieTag die == DW_TAG_unspecified_parameters -> pure (FormalParameters [] True, rest)
+        | dieTag die == DW_TAG_formal_parameter -> do
+            param <- parseFormalParameter die
+            go rest <&> _1 . formalParametersLens %~ (param :)
+        | otherwise -> go rest <&> _2 %~ (die:)
+
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
   , subrRetType :: TypeRef
-    -- TODO: Reduce duplication with subprogram formal params
-  , subrFormalParameters :: [Boxed FormalParameter]
-  , subrHaveUnspecified :: Bool
+  , subrFormalParameters :: FormalParameters
   } deriving (Eq, Ord, Show)
 
+-- DW_AT_prototyped=(DW_ATVAL_BOOL True)
+-- DW_AT_type=(DW_ATVAL_REF (DieID 62))
 parseSubroutineType :: [DIE] -> AttrGetterT M SubroutineType
 parseSubroutineType children = do
-  (params, haveUnspecified) <- lift (parseParameters children)
-  SubroutineType
-    <$> flag DW_AT_prototyped
-    <*> parseTypeRef
-    <*> pure params
-    <*> pure haveUnspecified
-  where
-    parseParameters [] = pure ([], False)
-    parseParameters [die] | dieTag die == DW_TAG_unspecified_parameters = pure ([], True)
-    parseParameters (die:dies) = do
-      param <- parseFormalParameter die
-      parseParameters dies <&> _1 %~ (param :)
+  (params, extraChildren) <- lift $ parseFormalParameters children
+  case extraChildren of
+    [] ->
+      SubroutineType
+      <$> flag DW_AT_prototyped
+      <*> parseTypeRef
+      <*> pure params
+    _ -> fail $ "Unexpected children of SubroutineType: " ++ show extraChildren
 
 getLowPC :: AttrGetterT M Word64
 getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
+
+getMRanges :: AttrGetterT M (Maybe Word64)
+getMRanges = AttrGetter.findAttr DW_AT_ranges _ATVAL_UINT
 
 getMLowPC :: AttrGetterT M (Maybe Word64)
 getMLowPC = AttrGetter.findAttr DW_AT_low_pc _ATVAL_UINT
 
 getMHighPC :: AttrGetterT M (Maybe Word64)
 getMHighPC = AttrGetter.findAttr DW_AT_high_pc _ATVAL_UINT
+
+getMFrameBase :: Dwarf.Reader -> AttrGetterT M (Maybe Loc)
+getMFrameBase reader =
+  fmap (parseLoc reader) <$>
+  AttrGetter.findAttrVal DW_AT_frame_base
 
 data InlineType = InlineType
   { inlineRequested :: Bool
@@ -477,88 +506,130 @@ data Variable name = Variable
   , varConstVal :: Maybe Word64
   } deriving (Eq, Ord, Show)
 
-parseVariable :: Dwarf.Reader -> AttrGetterT M name -> AttrGetterT M (Variable name)
-parseVariable reader getVarName = do
-  -- for now, ignore abstract origins
-  _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
-  Variable
-    <$> getVarName
-    <*> getDecl
-    <*> (fmap (parseLoc reader) <$> AttrGetter.findAttrVal DW_AT_location)
-    <*> flag DW_AT_external
-    <*> flag DW_AT_declaration
-    <*> flag DW_AT_artificial
-    <*> parseTypeRef
-    <*> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
+noChildren :: DIE -> a -> a
+noChildren     DIE{dieChildren=[]} = id
+noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
+
+-- TODO: Use Alternative/MonadPlus instance so that we can combine
+-- parsers with <|> rather than test outside if it is DW_TAG_variable
+-- and then rely on it here unsafely
+parseVariable :: DIE -> AttrGetterT M name -> M (Boxed (Variable name))
+parseVariable die getVarName =
+  noChildren die $ mkBox die $ do
+    -- for now, ignore abstract origins
+    _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
+    Variable
+      <$> getVarName
+      <*> getDecl
+      <*> (fmap (parseLoc (dieReader die)) <$> AttrGetter.findAttrVal DW_AT_location)
+      <*> flag DW_AT_external
+      <*> flag DW_AT_declaration
+      <*> flag DW_AT_artificial
+      <*> parseTypeRef
+      <*> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
+
+data InlinedSubroutine = InlinedSubroutine
+  { inlinedSubroutineCallFile :: Maybe Word64
+  , inlinedSubroutineCallLine :: Maybe Word64
+  , inlinedSubroutineRanges :: Maybe Word64
+  , inlinedSubroutineEntryPC :: Word64
+  , inlinedSubroutineSubprogram :: Subprogram
+  } deriving (Eq, Ord, Show)
+
+parseInlinedSubroutine :: DIE -> M (Boxed InlinedSubroutine)
+parseInlinedSubroutine die =
+  mkBox die $ InlinedSubroutine
+  <$> AttrGetter.findAttr DW_AT_call_file _ATVAL_UINT
+  <*> AttrGetter.findAttr DW_AT_call_line _ATVAL_UINT
+  <*> getMRanges
+  <*> AttrGetter.getAttr DW_AT_entry_pc  _ATVAL_UINT
+  <*> parseSubprogram (dieReader die) (dieChildren die)
+
+data LexicalBlock = LexicalBlock
+  { lexicalBlockRanges :: Maybe Word64
+  , lexicalBlockLowPC :: Maybe Word64
+  , lexicalBlockHighPC :: Maybe Word64
+  , lexicalBlockSubprogram :: Subprogram
+  } deriving (Eq, Ord, Show)
+
+parseLexicalBlock :: DIE -> M (Boxed LexicalBlock)
+parseLexicalBlock die =
+  mkBox die $ LexicalBlock
+  <$> getMRanges
+  <*> getMLowPC
+  <*> getMHighPC
+  <*> parseSubprogram (dieReader die) (dieChildren die)
+
+data SubprogramChild
+  = SubprogramChildDef Def
+  | SubprogramChildLexicalBlock LexicalBlock -- TODO: Lexical blocks don't quite have everything a subprogram does
+  | SubprogramChildInlinedSubroutine InlinedSubroutine
+  | SubprogramChildLabel -- TODO: Label content
+  | SubprogramChildOther DW_TAG
+  deriving (Eq, Ord, Show)
 
 data Subprogram = Subprogram
   { subprogName :: Maybe String -- abstract-origin subprograms are anonymous
+  , subprogType :: TypeRef
+  , subprogFormalParameters :: FormalParameters
   , subprogDecl :: Decl
   , subprogPrototyped :: Bool
   , subprogExternal :: Bool
   , subprogLowPC :: Maybe Word64
   , subprogHighPC :: Maybe Word64
   , subprogFrameBase :: Maybe Loc
-  , subprogFormalParameters :: [Boxed FormalParameter]
-  , subprogUnspecifiedParameters :: Bool
-  , subprogVariables :: [Boxed (Variable (Maybe String))]
-  , subprogType :: TypeRef
   , subprogInline :: Maybe InlineType
   , subprogDeclaration :: Bool
   , subprogArtificial :: Bool
   , subprogLinkageName :: Maybe String
+  , subprogChildren :: [Boxed SubprogramChild]
   } deriving (Eq, Ord, Show)
-
-data SubprogramChild
-  = SubprogramChildFormalParameter (Boxed FormalParameter)
-  | SubprogramChildVariable (Boxed (Variable (Maybe String)))
-  | SubprogramChildIgnored
-  | SubprogramChildUnspecifiedParameters
-  deriving (Eq)
-
-noChildren :: DIE -> a -> a
-noChildren     DIE{dieChildren=[]} = id
-noChildren die@DIE{dieChildren=cs} = error $ "Unexpected children: " ++ show cs ++ " in " ++ show die
 
 parseSubprogram :: Dwarf.Reader -> [DIE] -> AttrGetterT M Subprogram
 parseSubprogram reader children = do
-  parsedChildren <- mapM (lift . parseChild) children
+  (params, extraChildren) <- lift $ parseFormalParameters children
   -- for now, ignore abstract origins & GNU extended attr for now
   _ <- AttrGetter.findAttrVal $ DW_AT_user 0x2117
   _ <- AttrGetter.findAttrVal $ DW_AT_user 0x2116
   _ <- AttrGetter.findAttrVal DW_AT_abstract_origin
   Subprogram
     <$> getMName
+    <*> parseTypeRef
+    <*> pure params
     <*> getDecl
     <*> flag DW_AT_prototyped
     <*> flag DW_AT_external
     <*> getMLowPC
     <*> getMHighPC
-    <*> (fmap (parseLoc reader) <$> AttrGetter.findAttrVal DW_AT_frame_base)
-    <*> pure [x | SubprogramChildFormalParameter x <- parsedChildren]
-    <*> pure (SubprogramChildUnspecifiedParameters `elem` parsedChildren)
-    <*> pure [x | SubprogramChildVariable x <- parsedChildren]
-    <*> parseTypeRef
+    <*> getMFrameBase reader
     <*> getInlineType
     <*> flag DW_AT_declaration
     <*> flag DW_AT_artificial
     <*> AttrGetter.findAttr DW_AT_linkage_name _ATVAL_STRING
+    <*> mapM (lift . parseChild) extraChildren
   where
     parseChild child =
       case dieTag child of
-      DW_TAG_formal_parameter ->
-        SubprogramChildFormalParameter <$> parseFormalParameter child
-      DW_TAG_lexical_block -> pure SubprogramChildIgnored -- TODO: Parse content?
-      DW_TAG_label -> pure SubprogramChildIgnored
-      DW_TAG_variable ->
-        noChildren child $
-        SubprogramChildVariable <$> mkBox child (parseVariable reader getMName)
-      DW_TAG_inlined_subroutine -> pure SubprogramChildIgnored
-      DW_TAG_user 137 -> pure SubprogramChildIgnored -- GNU extensions, safe to ignore here
-      DW_TAG_unspecified_parameters -> pure SubprogramChildUnspecifiedParameters
-      DW_TAG_structure_type -> pure SubprogramChildIgnored
-      DW_TAG_union_type -> pure SubprogramChildIgnored
-      _ -> error $ "unsupported child tag in child: " ++ show child
+      DW_TAG_formal_parameter -> error $ "BUG: formal_parameter not captured by parseFormalParameters: " ++ show child
+      DW_TAG_unspecified_parameters -> error $ "BUG: unspecified_parameters not captured by parseFormalParameters: " ++ show child
+      DW_TAG_lexical_block -> fmap SubprogramChildLexicalBlock <$> parseLexicalBlock child
+      DW_TAG_label -> mkBox child $ pure SubprogramChildLabel
+      DW_TAG_inlined_subroutine -> fmap SubprogramChildInlinedSubroutine <$> parseInlinedSubroutine child
+      tag | tag `elem`
+        [ DW_TAG_base_type
+        , DW_TAG_typedef
+        , DW_TAG_pointer_type
+        , DW_TAG_const_type
+        , DW_TAG_volatile_type
+        , DW_TAG_structure_type
+        , DW_TAG_array_type
+        , DW_TAG_union_type
+        , DW_TAG_enumeration_type
+        , DW_TAG_subroutine_type
+        , DW_TAG_variable
+        , DW_TAG_subprogram
+        ] -> fmap SubprogramChildDef <$> parseDef child
+      _ -> pure $ Boxed (dieId child) $ SubprogramChildOther $ dieTag child -- GNU extensions, safe to ignore here
 
 data DefType
   = DefBaseType BaseType
@@ -598,12 +669,8 @@ parseDefTypeI die =
 parseDef :: DIE -> M (Boxed Def)
 parseDef die =
   case dieTag die of
-  DW_TAG_variable ->
-    mkBox die . noChildren die $
-    DefVariable <$> parseVariable (dieReader die) getName
-  DW_TAG_subprogram ->
-    mkBox die $
-    DefSubprogram <$> parseSubprogram (dieReader die) (dieChildren die)
+  DW_TAG_variable -> fmap DefVariable <$> parseVariable die getName
+  DW_TAG_subprogram -> mkBox die $ DefSubprogram <$> parseSubprogram (dieReader die) (dieChildren die)
   _ ->
     (fmap . fmap) DefType .
     cachedMake (dieId die) $
@@ -640,7 +707,7 @@ parseCU dieMap die =
   <*> AttrGetter.getAttr DW_AT_comp_dir _ATVAL_STRING
   <*> getLowPC
   <*> getMHighPC
-  <*> AttrGetter.findAttr DW_AT_ranges _ATVAL_UINT
+  <*> getMRanges
   <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
   -- lineNumInfo
   <*> mapM (lift . parseDef) (dieChildren die)

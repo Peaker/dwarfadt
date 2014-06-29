@@ -85,8 +85,8 @@ enumerationType ADT.EnumerationType
 
 data Precedence = Prefix | Postfix
 
-paramList :: [Boxed ADT.FormalParameter] -> Bool -> PP.Doc
-paramList params haveUnspecifiedParams =
+paramList :: ADT.FormalParameters -> PP.Doc
+paramList (ADT.FormalParameters params haveUnspecifiedParams) =
   "(" <> PP.hcat (List.intersperse ", " (map param params ++ ["..." | haveUnspecifiedParams])) <> ")"
   where
     param
@@ -143,8 +143,8 @@ ppType mName = result . recurseType
         annotate (simplePrecedence Postfix) (<> PP.parens
                   (PP.hcat $ PP.punctuate PP.comma (map (subRange . bData) r))) $ recurseType t
       DefSubroutineType ADT.SubroutineType
-        { ADT.subrRetType = t, ADT.subrFormalParameters = params, ADT.subrHaveUnspecified = unspec } ->
-        annotate (simplePrecedence Postfix) (<> paramList params unspec) $ recurseType t
+        { ADT.subrRetType = t, ADT.subrFormalParameters = params } ->
+        annotate (simplePrecedence Postfix) (<> paramList params) $ recurseType t
 
 defTypedef :: ADT.Typedef -> PP.Doc
 defTypedef (ADT.Typedef name _ typeRef) = "typedef " <> ppType (Just name) typeRef
@@ -165,10 +165,9 @@ defSubprogram ADT.Subprogram
   , ADT.subprogFormalParameters = params
   , ADT.subprogLowPC = lowPC
   , ADT.subprogHighPC = highPC
-  , ADT.subprogUnspecifiedParameters = unspec
   } =
   PP.hcat
-  [ ppType name typ, paramList params unspec
+  [ ppType name typ, paramList params
   , " at (", m lowPC, ":", m highPC, ")"
   ]
   where
