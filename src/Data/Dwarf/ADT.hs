@@ -13,7 +13,7 @@ module Data.Dwarf.ADT
   , ConstType(..)
   , VolatileType(..)
   , FormalParameters(..)
-  , Member(..), StructureType(..), UnionType(..)
+  , MemberLocation(..), Member(..), StructureType(..), UnionType(..)
   , SubrangeType(..), ArrayType(..)
   , EnumerationType(..), Enumerator(..)
   , SubroutineType(..), FormalParameter(..)
@@ -254,7 +254,7 @@ data Member loc = Member
   , membByteSize :: Maybe Word64
   , membBitSize :: Maybe Word64
   , membBitOffset :: Maybe Word64
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord, Show, Functor)
 
 parseMember :: (Dwarf.Reader -> AttrGetterT M loc) -> DIE -> M (Boxed (Member loc))
 parseMember getMemberLocation die =
