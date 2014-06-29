@@ -32,7 +32,7 @@ import Control.Monad.Trans.State (StateT, evalStateT)
 import Control.Monad.Trans.Writer (Writer, runWriter)
 import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..))
 import Data.Dwarf.AttrGetter (AttrGetterT)
-import Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BLOB, _ATVAL_BOOL)
+import Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
 import Data.Int (Int64)
 import Data.List (intercalate)
 import Data.Map (Map)
@@ -231,6 +231,11 @@ data VolatileType = VolatileType
 parseVolatileType :: AttrGetterT M VolatileType
 parseVolatileType = VolatileType <$> parseTypeRef
 
+data MemberLocation
+  = MemberLocationConstant Word64
+  | MemberLocationExpression Dwarf.DW_OP
+  deriving (Eq, Ord, Show)
+
 -- DW_AT_name=(DW_ATVAL_STRING "__val")
 -- DW_AT_decl_file=(DW_ATVAL_UINT 4)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 144)
@@ -247,12 +252,12 @@ data Member loc = Member
   } deriving (Eq, Ord, Show)
 
 parseMember :: (Dwarf.Reader -> AttrGetterT M loc) -> DIE -> M (Boxed (Member loc))
-parseMember getLoc die =
+parseMember getMemberLocation die =
   box DW_TAG_member die $
   Member
   <$> getMName
   <*> getDecl
-  <*> getLoc (dieReader die)
+  <*> getMemberLocation (dieReader die)
   <*> parseTypeRef
   <*> AttrGetter.findAttr DW_AT_byte_size _ATVAL_UINT
   <*> AttrGetter.findAttr DW_AT_bit_size _ATVAL_UINT
@@ -267,11 +272,20 @@ data StructureType = StructureType
   , stByteSize :: Maybe Word -- Does not exist for forward-declarations
   , stDecl :: Decl
   , stIsDeclaration :: Bool -- is forward-declaration
-  , stMembers :: [Boxed (Member Dwarf.DW_OP)]
+  , stMembers :: [Boxed (Member MemberLocation)]
   } deriving (Eq, Ord, Show)
 
 flag :: DW_AT -> AttrGetterT M Bool
 flag atId = ((Just True ==) <$> AttrGetter.findAttr atId _ATVAL_BOOL)
+
+parseMemberLocation :: Dwarf.Reader -> DW_ATVAL -> MemberLocation
+parseMemberLocation reader attrVal =
+  case attrVal of
+    Dwarf.DW_ATVAL_BLOB opStr -> MemberLocationExpression $ Dwarf.parseDW_OP reader opStr
+    Dwarf.DW_ATVAL_UINT uint -> MemberLocationConstant uint
+    _ ->
+      -- TODO: Use function from AttrGetter to get better error
+      error $ "member location of unknown type: " ++ show attrVal
 
 parseStructureType :: [DIE] -> AttrGetterT M StructureType
 parseStructureType children =
@@ -280,12 +294,15 @@ parseStructureType children =
   <*> getMByteSize
   <*> getDecl
   <*> flag DW_AT_declaration
-  <*> mapM (lift . parseMember getLoc) children
+  <*> mapM (lift . parseMember getStructMemberLocation) children
   where
-    getLoc reader =
-      Dwarf.parseDW_OP reader <$>
-      AttrGetter.getAttr DW_AT_data_member_location _ATVAL_BLOB
-  -- TODO: Parse the member_location, It's a blob with a DWARF program..
+    getStructMemberLocation reader = do
+      mAttrVal <- AttrGetter.findAttrVal DW_AT_data_member_location
+      return $ case mAttrVal of
+        Nothing ->
+          -- TODO: Use function from AttrGetter to get better error
+          error "StructureType must have a member location"
+        Just attrVal -> parseMemberLocation reader attrVal
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 101))
 -- DW_AT_upper_bound=(DW_ATVAL_UINT 1)
@@ -320,7 +337,7 @@ data UnionType = UnionType
   { unionName :: Maybe String
   , unionByteSize :: Word
   , unionDecl :: Decl
-  , unionMembers :: [Boxed (Member (Maybe Dwarf.DW_OP))]
+  , unionMembers :: [Boxed (Member (Maybe MemberLocation))]
   } deriving (Eq, Ord, Show)
 
 parseUnionType :: [DIE] -> AttrGetterT M UnionType
@@ -329,11 +346,11 @@ parseUnionType children =
   <$> getMName
   <*> getByteSize
   <*> getDecl
-  <*> mapM (lift . parseMember getLoc) children
+  <*> mapM (lift . parseMember getUnionMemberLocation) children
   where
-    getLoc reader =
-      fmap (Dwarf.parseDW_OP reader) <$>
-      AttrGetter.findAttr DW_AT_data_member_location _ATVAL_BLOB
+    getUnionMemberLocation reader = do
+      mAttr <- AttrGetter.findAttrVal DW_AT_data_member_location
+      return $ fmap (parseMemberLocation reader) mAttr
 
 -- DW_AT_name=(DW_ATVAL_STRING "_SC_ARG_MAX")
 -- DW_AT_const_value=(DW_ATVAL_INT 0)
