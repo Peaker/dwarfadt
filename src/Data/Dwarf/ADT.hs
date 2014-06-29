@@ -20,7 +20,8 @@ module Data.Dwarf.ADT
   , InlineType(..)
   , InlinedSubroutine(..)
   , LexicalBlock(..)
-  , Subprogram(..)
+  , SubprogramChild(..)
+  , Subprogram(..), subprogramDefs
   , Variable(..)
   ) where
 
@@ -564,9 +565,20 @@ data SubprogramChild
   = SubprogramChildDef Def
   | SubprogramChildLexicalBlock LexicalBlock -- TODO: Lexical blocks don't quite have everything a subprogram does
   | SubprogramChildInlinedSubroutine InlinedSubroutine
+  | SubprogramChildLocalVariable (Variable (Maybe String))
   | SubprogramChildLabel -- TODO: Label content
   | SubprogramChildOther DW_TAG
   deriving (Eq, Ord, Show)
+
+subprogramChildDefs :: Boxed SubprogramChild -> [Boxed Def]
+subprogramChildDefs (Boxed dId item) =
+  case item of
+  SubprogramChildDef def -> [Boxed dId def]
+  SubprogramChildLexicalBlock x -> subprogramDefs (lexicalBlockSubprogram x)
+  SubprogramChildInlinedSubroutine x -> subprogramDefs (inlinedSubroutineSubprogram x)
+  SubprogramChildLocalVariable _ -> []
+  SubprogramChildLabel -> []
+  SubprogramChildOther _ -> []
 
 data Subprogram = Subprogram
   { subprogName :: Maybe String -- abstract-origin subprograms are anonymous
@@ -584,6 +596,9 @@ data Subprogram = Subprogram
   , subprogLinkageName :: Maybe String
   , subprogChildren :: [Boxed SubprogramChild]
   } deriving (Eq, Ord, Show)
+
+subprogramDefs :: Subprogram -> [Boxed Def]
+subprogramDefs = concatMap subprogramChildDefs . subprogChildren
 
 parseSubprogram :: Dwarf.Reader -> [DIE] -> AttrGetterT M Subprogram
 parseSubprogram reader children = do
@@ -608,12 +623,14 @@ parseSubprogram reader children = do
     <*> AttrGetter.findAttr DW_AT_linkage_name _ATVAL_STRING
     <*> mapM (lift . parseChild) extraChildren
   where
+    fakeBox child = pure . Boxed (dieId child)
     parseChild child =
       case dieTag child of
       DW_TAG_formal_parameter -> error $ "BUG: formal_parameter not captured by parseFormalParameters: " ++ show child
       DW_TAG_unspecified_parameters -> error $ "BUG: unspecified_parameters not captured by parseFormalParameters: " ++ show child
       DW_TAG_lexical_block -> fmap SubprogramChildLexicalBlock <$> parseLexicalBlock child
-      DW_TAG_label -> mkBox child $ pure SubprogramChildLabel
+      DW_TAG_variable -> fmap SubprogramChildLocalVariable <$> parseVariable child getMName
+      DW_TAG_label -> fakeBox child $ SubprogramChildLabel
       DW_TAG_inlined_subroutine -> fmap SubprogramChildInlinedSubroutine <$> parseInlinedSubroutine child
       tag | tag `elem`
         [ DW_TAG_base_type
@@ -629,7 +646,7 @@ parseSubprogram reader children = do
         , DW_TAG_variable
         , DW_TAG_subprogram
         ] -> fmap SubprogramChildDef <$> parseDef child
-      _ -> pure $ Boxed (dieId child) $ SubprogramChildOther $ dieTag child -- GNU extensions, safe to ignore here
+      _ -> fakeBox child $ SubprogramChildOther $ dieTag child -- GNU extensions, safe to ignore here
 
 data DefType
   = DefBaseType BaseType

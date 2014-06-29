@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Data.Dwarf.ADT.Pretty (compilationUnit, dwarf) where
 
+import Control.Applicative ((<$>))
 import Data.Dwarf (DW_ATE(..))
 import Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
 import Data.Maybe (mapMaybe)
@@ -158,6 +159,25 @@ defUnionType = unionType
 defEnumerationType :: ADT.EnumerationType -> PP.Doc
 defEnumerationType = enumerationType
 
+lexicalBlock :: ADT.LexicalBlock -> PP.Doc
+lexicalBlock (ADT.LexicalBlock _ _ _ s) =
+  PP.text "lexical block " <> defSubprogram s
+
+inlinedSubroutine :: ADT.InlinedSubroutine -> PP.Doc
+inlinedSubroutine (ADT.InlinedSubroutine _ _ _ _ s) =
+  PP.text "inlined " <> defSubprogram s
+
+subprogChild :: Boxed ADT.SubprogramChild -> Maybe PP.Doc
+subprogChild (Boxed dId dat) =
+  (showPP dId <> " " <>) . (<> ";") <$>
+  case dat of
+  ADT.SubprogramChildDef x -> def (Boxed dId x)
+  ADT.SubprogramChildLexicalBlock x -> Just $ lexicalBlock x
+  ADT.SubprogramChildInlinedSubroutine x -> Just $ inlinedSubroutine x
+  ADT.SubprogramChildLabel -> Nothing
+  ADT.SubprogramChildLocalVariable _ -> Nothing
+  ADT.SubprogramChildOther _ -> Nothing
+
 defSubprogram :: ADT.Subprogram -> PP.Doc
 defSubprogram ADT.Subprogram
   { ADT.subprogName = name
@@ -165,11 +185,14 @@ defSubprogram ADT.Subprogram
   , ADT.subprogFormalParameters = params
   , ADT.subprogLowPC = lowPC
   , ADT.subprogHighPC = highPC
+  , ADT.subprogChildren = children
   } =
-  PP.hcat
-  [ ppType name typ, paramList params
-  , " at (", m lowPC, ":", m highPC, ")"
-  ]
+  PP.vcat $
+  [ PP.hcat
+    [ ppType name typ, paramList params
+    , " at (", m lowPC, ":", m highPC, ")"
+    ]
+  ] ++ mapMaybe subprogChild children
   where
     m = maybe "" showPP
 
