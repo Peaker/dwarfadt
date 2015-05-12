@@ -4,9 +4,9 @@ module Data.Dwarf.Elf
   , parseElfDwarfADT
   ) where
 
-import Control.Applicative (Applicative(..), (<$>))
+import Control.Applicative (Applicative(..), (<$>), pure)
 import Data.Dwarf.ADT (Dwarf)
-import Data.Elf (parseElf, Elf(..), ElfSection(..))
+import Data.Elf (parseElf, Elf(..), ElfData(..), ElfSection(..))
 import Data.List (find)
 import System.IO.Posix.MMap (unsafeMMapFile)
 import qualified Data.ByteString as BS
@@ -19,11 +19,14 @@ elfSectionByName elf name =
   fmap elfSectionData .
   find ((== name) . elfSectionName) $ elfSections elf
 
-loadElfDwarf :: Dwarf.Endianess -> FilePath -> IO (Elf, ([Dwarf.DIE], Dwarf.DIEMap))
-loadElfDwarf endianess filename = do
+loadElfDwarf :: FilePath -> IO (Elf, ([Dwarf.DIE], Dwarf.DIEMap))
+loadElfDwarf filename = do
   bs <- unsafeMMapFile filename
   let elf = parseElf bs
       get = elfSectionByName elf
+      endianess = case elfData elf of
+        ELFDATA2LSB -> Dwarf.LittleEndian
+        ELFDATA2MSB -> Dwarf.BigEndian
   sections <-
     either fail return $
     Dwarf.Sections
@@ -32,7 +35,7 @@ loadElfDwarf endianess filename = do
     <*> get ".debug_str"
   pure (elf, Dwarf.parseInfo endianess sections)
 
-parseElfDwarfADT :: Dwarf.Endianess -> FilePath -> IO (Dwarf, [Dwarf.ADT.Warning])
-parseElfDwarfADT endianess filename = do
-  (_elf, (cuDies, dieMap)) <- loadElfDwarf endianess filename
+parseElfDwarfADT :: FilePath -> IO (Dwarf, [Dwarf.ADT.Warning])
+parseElfDwarfADT filename = do
+  (_elf, (cuDies, dieMap)) <- loadElfDwarf filename
   pure $ Dwarf.ADT.fromDies dieMap cuDies
