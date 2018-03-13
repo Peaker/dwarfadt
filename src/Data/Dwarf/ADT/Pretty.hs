@@ -1,13 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Data.Dwarf.ADT.Pretty (compilationUnit, dwarf) where
 
-import Control.Applicative ((<$>))
-import Data.Dwarf (DW_ATE(..))
-import Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
-import Data.Maybe (mapMaybe)
-import Text.PrettyPrint ((<>))
+import           Control.Applicative ((<$>))
+import           Data.Dwarf (DW_ATE(..))
+import           Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
 import qualified Data.Dwarf.ADT as ADT
 import qualified Data.List as List
+import           Data.Maybe (mapMaybe)
+import           Data.Text (Text)
+import qualified Data.Text as Text
+import           Text.PrettyPrint ((<>))
 import qualified Text.PrettyPrint as PP
 
 showPP :: Show a => a -> PP.Doc
@@ -32,18 +34,21 @@ ppATE DW_ATE_signed_fixed = "signed_fixed"
 ppATE DW_ATE_unsigned_fixed = "unsigned_fixed"
 ppATE DW_ATE_decimal_float = "decimal_float"
 
+text :: Text -> PP.Doc
+text = PP.text . Text.unpack
+
 baseTypeName :: ADT.BaseType -> PP.Doc
-baseTypeName (ADT.BaseType _ _ (Just name)) = PP.text name
+baseTypeName (ADT.BaseType _ _ (Just name)) = text name
 baseTypeName (ADT.BaseType _ encoding Nothing) = ppATE encoding
 
-withName :: PP.Doc -> Maybe String -> PP.Doc
+withName :: PP.Doc -> Maybe Text -> PP.Doc
 withName prefix Nothing = prefix
-withName prefix (Just name) = prefix <> " " <> PP.text name
+withName prefix (Just name) = prefix <> " " <> text name
 
 indent :: PP.Doc -> PP.Doc
 indent x = "  " <> x
 
-compositeMembers :: PP.Doc -> Maybe String -> [Boxed (ADT.Member a)] -> PP.Doc
+compositeMembers :: PP.Doc -> Maybe Text -> [Boxed (ADT.Member a)] -> PP.Doc
 compositeMembers prefix mName members =
   PP.vcat
   [ withName prefix mName <> " {"
@@ -78,7 +83,7 @@ enumerationType ADT.EnumerationType
   ]
   where
     enumeratorPP Boxed { bData = enumerator } = PP.hcat
-      [ PP.text $ ADT.enumeratorName enumerator
+      [ text $ ADT.enumeratorName enumerator
       , " = "
       , showPP $ ADT.enumeratorConstValue enumerator
       , ","
@@ -97,12 +102,12 @@ paramList (ADT.FormalParameters params haveUnspecifiedParams) =
         }
       } = ppType name t
 
-ppType :: Maybe String -> ADT.TypeRef -> PP.Doc
+ppType :: Maybe Text -> ADT.TypeRef -> PP.Doc
 ppType mName = result . recurseType
   where
     result (baseType, decl) = baseType <> PP.space <> decl Nothing (nameCont mName)
     nameCont Nothing = id
-    nameCont (Just name) = (<> PP.text name)
+    nameCont (Just name) = (<> text name)
     addAnnotation onPrecedence f innerDecl outerPrecedence cont =
       innerDecl innerPrecedence $ f . p . cont
       where
@@ -118,17 +123,17 @@ ppType mName = result . recurseType
     recurseType (ADT.TypeRef Boxed { bData = typ }) =
       case typ of
       DefBaseType x -> mkBaseType $ baseTypeName x
-      DefTypedef x -> mkBaseType . PP.text $ ADT.tdName x
+      DefTypedef x -> mkBaseType . text $ ADT.tdName x
       DefStructureType ADT.StructureType { ADT.stName = Just name } ->
-        mkBaseType $ "struct " <> PP.text name
+        mkBaseType $ "struct " <> text name
       DefStructureType x@ADT.StructureType { ADT.stName = Nothing } ->
         mkBaseType $ structureType x
       DefUnionType ADT.UnionType { ADT.unionName = Just name } ->
-        mkBaseType $ "union " <> PP.text name
+        mkBaseType $ "union " <> text name
       DefUnionType x@ADT.UnionType { ADT.unionName = Nothing } ->
         mkBaseType $ unionType x
       DefEnumerationType ADT.EnumerationType { ADT.enumName = Just name } ->
-        mkBaseType $ "enum " <> PP.text name
+        mkBaseType $ "enum " <> text name
       DefEnumerationType x@ADT.EnumerationType { ADT.enumName = Nothing } ->
         mkBaseType $ enumerationType x
 
@@ -161,11 +166,11 @@ defEnumerationType = enumerationType
 
 lexicalBlock :: ADT.LexicalBlock -> PP.Doc
 lexicalBlock (ADT.LexicalBlock _ _ _ s) =
-  PP.text "lexical block " <> defSubprogram s
+  "lexical block " <> defSubprogram s
 
 inlinedSubroutine :: ADT.InlinedSubroutine -> PP.Doc
 inlinedSubroutine (ADT.InlinedSubroutine _ _ _ _ s) =
-  PP.text "inlined " <> defSubprogram s
+  "inlined " <> defSubprogram s
 
 subprogChild :: Boxed ADT.SubprogramChild -> Maybe PP.Doc
 subprogChild (Boxed dId dat) =
@@ -196,7 +201,7 @@ defSubprogram ADT.Subprogram
   where
     m = maybe "" showPP
 
-defVariable :: (name -> Maybe String) -> ADT.Variable name -> PP.Doc
+defVariable :: (name -> Maybe Text) -> ADT.Variable name -> PP.Doc
 defVariable f ADT.Variable
   { ADT.varName = name, ADT.varType = typeRef } = ppType (f name) typeRef
 

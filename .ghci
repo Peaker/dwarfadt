@@ -1,0 +1,4 @@
+:set -isrc
+:set -Wall -Widentities -Wmissing-home-modules -Wincomplete-patterns -Wnoncanonical-monad-instances -Wsemigroup -Wincomplete-record-updates -Wredundant-constraints
+:set -odir=ghci-out
+:set -outputdir=ghci-out

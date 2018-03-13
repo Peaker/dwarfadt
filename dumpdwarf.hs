@@ -1,9 +1,9 @@
 module Main(main) where
 
-import Data.Dwarf.Elf (loadElfDwarf)
-import Data.Tree (Tree(..), drawTree)
-import System.Environment (getArgs)
 import qualified Data.Dwarf as Dwarf
+import           Data.Dwarf.Elf (loadElfDwarf)
+import           Data.Tree (Tree(..), drawTree)
+import           System.Environment (getArgs)
 
 dieTree :: Dwarf.DIE -> Tree Dwarf.DIE
 dieTree die = Node die . map dieTree $ Dwarf.dieChildren die

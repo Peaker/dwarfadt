@@ -1,23 +1,27 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Data.Dwarf.Elf
   ( loadElfDwarf
   , elfSectionByName
   , parseElfDwarfADT
   ) where
 
-import Control.Applicative (Applicative(..), (<$>))
-import Data.Dwarf.ADT (Dwarf)
-import Data.Elf (parseElf, Elf(..), ElfSection(..))
-import Data.List (find)
-import System.IO.Posix.MMap (unsafeMMapFile)
+import           Control.Applicative (Applicative(..), (<$>))
 import qualified Data.ByteString as BS
 import qualified Data.Dwarf as Dwarf
+import           Data.Dwarf.ADT (Dwarf)
 import qualified Data.Dwarf.ADT as Dwarf.ADT
+import           Data.Elf (parseElf, Elf(..), ElfSection(..))
+import           Data.List (find)
+import           Data.Monoid ((<>))
+import           Data.Text (Text)
+import qualified Data.Text as Text
+import           System.IO.Posix.MMap (unsafeMMapFile)
 
-elfSectionByName :: Elf -> String -> Either String BS.ByteString
+elfSectionByName :: Elf -> Text -> Either Text BS.ByteString
 elfSectionByName elf name =
-  maybe (Left ("Missing section " ++ name)) Right .
+  maybe (Left ("Missing section " <> name)) Right .
   fmap elfSectionData .
-  find ((== name) . elfSectionName) $ elfSections elf
+  find ((== name) . Text.pack . elfSectionName) $ elfSections elf
 
 loadElfDwarf :: Dwarf.Endianess -> FilePath -> IO (Elf, ([Dwarf.DIE], Dwarf.DIEMap))
 loadElfDwarf endianess filename = do
@@ -25,7 +29,7 @@ loadElfDwarf endianess filename = do
   let elf = parseElf bs
       get = elfSectionByName elf
   sections <-
-    either fail return $
+    either (fail . Text.unpack) return $
     Dwarf.Sections
     <$> get ".debug_info"
     <*> get ".debug_abbrev"

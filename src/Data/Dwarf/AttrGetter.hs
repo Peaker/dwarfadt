@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, OverloadedStrings #-}
 module Data.Dwarf.AttrGetter
   ( AttrGetterT, run
   , findAttrVals, findAttrVal
@@ -6,20 +6,24 @@ module Data.Dwarf.AttrGetter
   , getAttr
   ) where
 
-import Control.Applicative (Applicative(..), (<$>))
-import Control.Lens ((^?))
-import Control.Monad (liftM)
-import Control.Monad.Trans.Class (MonadTrans(..))
-import Control.Monad.Trans.Reader (ReaderT(..))
-import Control.Monad.Trans.State (StateT(..))
-import Data.Dwarf (DIE(..), DW_AT, DW_ATVAL)
-import Data.List (partition)
-import Data.Maybe (fromMaybe)
+import           Control.Applicative (Applicative(..), (<$>))
+import           Control.Lens ((^?))
+import           Control.Monad (liftM)
+import           Control.Monad.Trans.Class (MonadTrans(..))
+import           Control.Monad.Trans.Reader (ReaderT(..))
 import qualified Control.Monad.Trans.Reader as Reader
+import           Control.Monad.Trans.State (StateT(..))
 import qualified Control.Monad.Trans.State as State
+import           Data.Dwarf (DIE(..), DW_AT, DW_ATVAL)
 import qualified Data.Dwarf.Lens as DwarfLens
+import           Data.List (partition)
+import           Data.Maybe (fromMaybe)
+import           Data.Monoid ((<>))
+import           Data.Text (Text)
+import qualified Data.Text as Text
+import           TextShow (TextShow(..))
 
-newtype AttrGetterT m a = AttrGetterT (ReaderT String (StateT [(DW_AT, DW_ATVAL)] m) a)
+newtype AttrGetterT m a = AttrGetterT (ReaderT Text (StateT [(DW_AT, DW_ATVAL)] m) a)
   deriving (Functor, Applicative, Monad)
 
 instance MonadTrans AttrGetterT where
@@ -28,10 +32,10 @@ instance MonadTrans AttrGetterT where
 run :: DIE -> AttrGetterT m a -> m (a, [(DW_AT, DW_ATVAL)])
 run die (AttrGetterT act) =
   (`runStateT` dieAttributes die) .
-  (`runReaderT` (" in " ++ show die)) $
+  (`runReaderT` (" in " <> showt die)) $
   act
 
-getSuffix :: Monad m => AttrGetterT m String
+getSuffix :: Monad m => AttrGetterT m Text
 getSuffix = AttrGetterT Reader.ask
 
 findAttrVals :: Monad m => DW_AT -> AttrGetterT m [DW_ATVAL]
@@ -49,19 +53,19 @@ findAttrVal at = AttrGetterT . lift $ do
       return $ Just val
     _ -> return Nothing
 
-getATVal :: String -> String -> DwarfLens.ATVAL_NamedPrism a -> DW_ATVAL -> a
+getATVal :: Text -> Text -> DwarfLens.ATVAL_NamedPrism a -> DW_ATVAL -> a
 getATVal prefix suffix (typName, typ) atval =
   fromMaybe (error msg) $ atval ^? typ
   where
-    msg = concat [prefix, " is: ", show atval, " but expected: ", typName, suffix]
+    msg = Text.unpack $ mconcat [prefix, " is: ", showt atval, " but expected: ", typName, suffix]
 
 toVal ::
-  (Monad m, Functor f, Show a) =>
+  (Monad m, Functor f, TextShow a) =>
   (a -> AttrGetterT m (f DW_ATVAL)) ->
   a -> DwarfLens.ATVAL_NamedPrism b -> AttrGetterT m (f b)
 toVal finder at prism = do
   suffix <- getSuffix
-  (liftM . fmap) (getATVal (show at) suffix prism) $ finder at
+  (liftM . fmap) (getATVal (showt at) suffix prism) $ finder at
 
 findAttrs :: Monad m => DW_AT -> DwarfLens.ATVAL_NamedPrism a -> AttrGetterT m [a]
 findAttrs = toVal findAttrVals
@@ -71,6 +75,7 @@ findAttr = toVal findAttrVal
 
 getAttr :: Monad m => DW_AT -> DwarfLens.ATVAL_NamedPrism a -> AttrGetterT m a
 getAttr at prism = do
-  suffix <- getSuffix
-  (liftM . fromMaybe . error) ("Could not find " ++ show at ++ suffix) $
-    findAttr at prism
+    suffix <- getSuffix
+    (liftM . fromMaybe . error . Text.unpack)
+        ("Could not find " <> showt at <> suffix) $
+        findAttr at prism

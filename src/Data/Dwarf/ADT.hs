@@ -25,36 +25,37 @@ module Data.Dwarf.ADT
   , Variable(..)
   ) where
 
-import Control.Applicative (Applicative(..), (<$>))
-import Control.Lens (Lens')
-import Control.Lens.Operators
-import Control.Lens.Tuple
-import Control.Monad (when)
-import Control.Monad.Fix (MonadFix, mfix)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Reader (ReaderT(..))
-import Control.Monad.Trans.State (StateT, evalStateT)
-import Control.Monad.Trans.Writer (Writer, runWriter)
-import Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..))
-import Data.Dwarf.AttrGetter (AttrGetterT)
-import Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
-import Data.Int (Int64)
-import Data.List (intercalate)
-import Data.Map (Map)
-import Data.Maybe (maybeToList)
-import Data.Traversable (traverse)
-import Data.Word (Word, Word64)
+import           Control.Applicative (Applicative(..), (<$>))
+import           Control.Lens (Lens')
+import           Control.Lens.Operators
+import           Control.Lens.Tuple
+import           Control.Monad (when)
+import           Control.Monad.Fix (MonadFix, mfix)
+import           Control.Monad.Trans.Class (lift)
+import           Control.Monad.Trans.Reader (ReaderT(..))
 import qualified Control.Monad.Trans.Reader as Reader
+import           Control.Monad.Trans.State (StateT, evalStateT)
 import qualified Control.Monad.Trans.State as State
+import           Control.Monad.Trans.Writer (Writer, runWriter)
 import qualified Control.Monad.Trans.Writer as Writer
+import           Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_ATVAL(..))
 import qualified Data.Dwarf as Dwarf
+import           Data.Dwarf.AttrGetter (AttrGetterT)
 import qualified Data.Dwarf.AttrGetter as AttrGetter
+import           Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
+import           Data.Int (Int64)
+import           Data.List (intercalate)
+import           Data.Map (Map)
 import qualified Data.Map as Map
+import           Data.Maybe (maybeToList)
+import           Data.Text (Text)
+import           Data.Traversable (traverse)
+import           Data.Word (Word, Word64)
 
-getName :: Monad m => AttrGetterT m String
+getName :: Monad m => AttrGetterT m Text
 getName = AttrGetter.getAttr DW_AT_name _ATVAL_STRING
 
-getMName :: Monad m => AttrGetterT m (Maybe String)
+getMName :: Monad m => AttrGetterT m (Maybe Text)
 getMName = AttrGetter.findAttr DW_AT_name _ATVAL_STRING
 
 data Warning = Warning
@@ -139,7 +140,7 @@ instance Show Decl where
     where
       toList x = maybeToList $ fmap show x
 
-getDecl :: (Monad m, Applicative m) => AttrGetterT m Decl
+getDecl :: Monad m => AttrGetterT m Decl
 getDecl =
   Decl
   <$> getUINT DW_AT_decl_file
@@ -148,10 +149,10 @@ getDecl =
   where
     getUINT = (`AttrGetter.findAttr` _ATVAL_UINT)
 
-getByteSize :: (Monad m, Applicative m) => AttrGetterT m Word
+getByteSize :: Monad m => AttrGetterT m Word
 getByteSize = fromIntegral <$> AttrGetter.getAttr DW_AT_byte_size _ATVAL_UINT
 
-getMByteSize :: (Monad m, Applicative m) => AttrGetterT m (Maybe Word)
+getMByteSize :: Monad m => AttrGetterT m (Maybe Word)
 getMByteSize = fmap fromIntegral <$> AttrGetter.findAttr DW_AT_byte_size _ATVAL_UINT
 
 data Boxed a = Boxed
@@ -174,10 +175,10 @@ box tag die act
 data BaseType = BaseType
   { btByteSize :: Word
   , btEncoding :: Dwarf.DW_ATE
-  , btName :: Maybe String
+  , btName :: Maybe Text
   } deriving (Eq, Ord, Show)
 
-parseBaseType :: (Monad m, Applicative m) => AttrGetterT m BaseType
+parseBaseType :: Monad m => AttrGetterT m BaseType
 parseBaseType =
   BaseType
   <$> getByteSize
@@ -189,7 +190,7 @@ parseBaseType =
 -- DW_AT_decl_line=(DW_ATVAL_UINT 149)
 -- DW_AT_type=(DW_ATVAL_REF (DieID 62))}
 data Typedef = Typedef
-  { tdName :: String
+  { tdName :: Text
   , tdDecl :: Decl
   , tdType :: TypeRef
   } deriving (Eq, Ord)
@@ -247,7 +248,7 @@ data MemberLocation
 -- DW_AT_type=(DW_ATVAL_REF (DieID 221))
 -- DW_AT_data_member_location=(DW_ATVAL_BLOB "#\NUL")
 data Member loc = Member
-  { membName :: Maybe String
+  { membName :: Maybe Text
   , membDecl :: Decl
   , membLoc :: loc
   , membType :: TypeRef
@@ -273,7 +274,7 @@ parseMember getMemberLocation die =
 -- DW_AT_decl_file=(DW_ATVAL_UINT 6)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 79)
 data StructureType = StructureType
-  { stName :: Maybe String
+  { stName :: Maybe Text
   , stByteSize :: Maybe Word -- Does not exist for forward-declarations
   , stDecl :: Decl
   , stIsDeclaration :: Bool -- is forward-declaration
@@ -339,7 +340,7 @@ parseArrayType cs =
 -- DW_AT_decl_file=(DW_ATVAL_UINT 6)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 96)
 data UnionType = UnionType
-  { unionName :: Maybe String
+  { unionName :: Maybe Text
   , unionByteSize :: Word
   , unionDecl :: Decl
   , unionMembers :: [Boxed (Member (Maybe MemberLocation))]
@@ -360,7 +361,7 @@ parseUnionType children =
 -- DW_AT_name=(DW_ATVAL_STRING "_SC_ARG_MAX")
 -- DW_AT_const_value=(DW_ATVAL_INT 0)
 data Enumerator = Enumerator
-  { enumeratorName :: String
+  { enumeratorName :: Text
   , enumeratorConstValue :: Int64
   } deriving (Eq, Ord, Show)
 
@@ -375,7 +376,7 @@ parseEnumerator die =
 -- DW_AT_decl_file=(DW_ATVAL_UINT 11)
 -- DW_AT_decl_line=(DW_ATVAL_UINT 74)
 data EnumerationType = EnumerationType
-  { enumName :: Maybe String
+  { enumName :: Maybe Text
   , enumDecl :: Decl
   , enumByteSize :: Word
   , enumEnumerators :: [Boxed Enumerator]
@@ -391,7 +392,7 @@ parseEnumerationType children =
 
 -- DW_AT_type=(DW_ATVAL_REF (DieID 119))
 data FormalParameter = FormalParameter
-  { formalParamName :: Maybe String
+  { formalParamName :: Maybe Text
   , formalParamDecl :: Decl
   , formalParamLocation :: Maybe Loc
   , formalParamType :: TypeRef
@@ -565,7 +566,7 @@ data SubprogramChild
   = SubprogramChildDef Def
   | SubprogramChildLexicalBlock LexicalBlock -- TODO: Lexical blocks don't quite have everything a subprogram does
   | SubprogramChildInlinedSubroutine InlinedSubroutine
-  | SubprogramChildLocalVariable (Variable (Maybe String))
+  | SubprogramChildLocalVariable (Variable (Maybe Text))
   | SubprogramChildLabel -- TODO: Label content
   | SubprogramChildOther DW_TAG
   deriving (Eq, Ord, Show)
@@ -581,7 +582,7 @@ subprogramChildDefs (Boxed dId item) =
   SubprogramChildOther _ -> []
 
 data Subprogram = Subprogram
-  { subprogName :: Maybe String -- abstract-origin subprograms are anonymous
+  { subprogName :: Maybe Text -- abstract-origin subprograms are anonymous
   , subprogType :: TypeRef
   , subprogFormalParameters :: FormalParameters
   , subprogDecl :: Decl
@@ -593,7 +594,7 @@ data Subprogram = Subprogram
   , subprogInline :: Maybe InlineType
   , subprogDeclaration :: Bool
   , subprogArtificial :: Bool
-  , subprogLinkageName :: Maybe String
+  , subprogLinkageName :: Maybe Text
   , subprogChildren :: [Boxed SubprogramChild]
   } deriving (Eq, Ord, Show)
 
@@ -664,7 +665,7 @@ data DefType
 data Def
   = DefType DefType
   | DefSubprogram Subprogram
-  | DefVariable (Variable String)
+  | DefVariable (Variable Text)
   deriving (Eq, Ord, Show)
 
 parseDefTypeI :: DIE -> M (Boxed DefType)
@@ -701,15 +702,15 @@ parseDef die =
 -- DW_AT_high_pc=(DW_ATVAL_UINT 135646754)
 -- DW_AT_stmt_list=(DW_ATVAL_UINT 0)
 data CompilationUnit = CompilationUnit
-  { cuProducer :: String
+  { cuProducer :: Text
   , cuLanguage :: Dwarf.DW_LANG
-  , cuName :: String
-  , cuCompDir :: String
+  , cuName :: Text
+  , cuCompDir :: Text
   , cuLowPc :: Word64
   , cuHighPc :: Maybe Word64
   , cuMRanges :: Maybe Word64
   , cuStmtList :: Word64 -- TODO: Parse this further
---  , cuLineNumInfo :: ([String], [Dwarf.DW_LNE])
+--  , cuLineNumInfo :: ([Text], [Dwarf.DW_LNE])
   , cuDefs :: [Boxed Def]
   } deriving (Show)
 
