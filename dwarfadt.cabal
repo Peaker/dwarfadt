@@ -37,6 +37,11 @@ executable dumpdwarf
   build-depends:       base >= 4.11 && < 5, dwarfadt, dwarf-el, containers
   ghc-options:         -Wall
 
+executable dumptypes
+  main-is:             dumptypes.hs
+  build-depends:       base >= 4 && < 5, dwarfadt, dwarf-el, containers, lens, text
+  ghc-options:         -Wall
+
 executable dumpadt
   main-is:             dumpadt.hs
   build-depends:       base >= 4.11 && < 5, dwarfadt, dwarf-el
