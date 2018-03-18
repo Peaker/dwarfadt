@@ -1,5 +1,5 @@
 name:                dwarfadt
-version:             0.5
+version:             0.6
 synopsis:            High-level wrapper around the dwarf library
 description:         dwarf is an excellent library to read dwarf files, but the output of
                      parsing dwarf is very low-level and difficult to work with.
