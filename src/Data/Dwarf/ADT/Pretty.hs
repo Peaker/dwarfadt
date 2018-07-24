@@ -9,7 +9,6 @@ import qualified Data.List as List
 import           Data.Maybe (mapMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as Text
-import           Text.PrettyPrint ((<>))
 import qualified Text.PrettyPrint as PP
 
 showPP :: Show a => a -> PP.Doc
@@ -174,7 +173,7 @@ inlinedSubroutine (ADT.InlinedSubroutine _ _ _ _ s) =
 
 subprogChild :: Boxed ADT.SubprogramChild -> Maybe PP.Doc
 subprogChild (Boxed dId dat) =
-  (showPP dId <> " " <>) . (<> ";") <$>
+  ((showPP dId <> " ") <>) . (<> ";") <$>
   case dat of
   ADT.SubprogramChildDef x -> def (Boxed dId x)
   ADT.SubprogramChildLexicalBlock x -> Just $ lexicalBlock x
@@ -219,7 +218,7 @@ defType t = case t of
   DefEnumerationType x -> Just $ "EnumerationType: " <> defEnumerationType x
 
 def :: Boxed Def -> Maybe PP.Doc
-def Boxed { bDieId = i, bData = d } = fmap ((showPP i <> " " <>) . (<> ";")) $
+def Boxed { bDieId = i, bData = d } = fmap (((showPP i <> " ") <>) . (<> ";")) $
   case d of
   DefType t            -> defType t
   DefSubprogram x      -> Just $ "Subprogram: "      <> defSubprogram x
