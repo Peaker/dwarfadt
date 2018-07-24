@@ -1,0 +1,6 @@
+packages:
+- '.'
+resolver: lts-12.0
+extra-deps:
+- bytestring-mmap-0.2.2
+- dwarf-el-0.3
