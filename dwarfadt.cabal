@@ -27,7 +27,7 @@ library
   other-modules:       Data.Dwarf.AttrGetter
                      , Data.Dwarf.Lens
   build-depends:       base >=4.11 && <5, elf >=0.27
-                     , bytestring-mmap >=0.2, dwarf-el >=0.3, lens >=3.9 && <4.17
+                     , bytestring-mmap >=0.2, dwarf-el >=0.3, lens >=3.9 && <4.18
                      , bytestring >=0.9, containers >= 0.3, transformers >= 0.3
                      , pretty >= 1.1, text, text-show
   ghc-options:         -Wall
