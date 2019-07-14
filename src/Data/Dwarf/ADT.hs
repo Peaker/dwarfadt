@@ -707,8 +707,8 @@ data CompilationUnit = CompilationUnit
   , cuLowPc :: Word64
   , cuHighPc :: Maybe Word64
   , cuMRanges :: Maybe Word64
-  , cuStmtList :: Word64 -- TODO: Parse this further
---  , cuLineNumInfo :: ([Text], [Dwarf.DW_LNE])
+  , cuStmtList :: Word64
+  , cuLineNumInfo :: Maybe Dwarf.LNE
   , cuDefs :: [Boxed Def]
   } deriving (Show)
 
@@ -725,7 +725,7 @@ parseCU dieMap die =
   <*> getMHighPC
   <*> getMRanges
   <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
-  -- lineNumInfo
+  <*> pure (dieLineInfo die)
   <*> mapM (lift . parseDef) (dieChildren die)
 
 fromDie :: DIEMap -> DIE -> (Boxed CompilationUnit, [Warning])

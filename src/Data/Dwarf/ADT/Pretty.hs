@@ -225,7 +225,7 @@ def Boxed { bDieId = i, bData = d } = fmap (((showPP i <> " ") <>) . (<> ";")) $
 
 compilationUnit :: Boxed ADT.CompilationUnit -> PP.Doc
 compilationUnit
-  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc ranges _stmtList defs))
+  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc ranges _stmtList _ defs))
   = PP.vcat
     [ "Compilation unit at " <> showPP i
     , indent $ PP.vcat
