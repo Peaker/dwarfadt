@@ -38,15 +38,15 @@ import           Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_A
 import qualified Data.Dwarf as Dwarf
 import           Data.Dwarf.AttrGetter (AttrGetterT)
 import qualified Data.Dwarf.AttrGetter as AttrGetter
-import           Data.Dwarf.Matchers (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
-import           Data.Int (Int64)
+import           Data.Dwarf.Matchers (_ATVAL_UINT, _ATVAL_INT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
 import           Data.List (intercalate)
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (maybeToList)
+import           Data.Maybe (maybeToList, fromMaybe)
 import           Data.Text (Text)
 import           Data.Word (Word64)
 import           Control.Arrow
+import           Control.Applicative((<|>))
 
 getName :: Monad m => AttrGetterT m Text
 getName = AttrGetter.getAttr DW_AT_name _ATVAL_STRING
@@ -358,7 +358,7 @@ parseUnionType children =
 -- DW_AT_const_value=(DW_ATVAL_INT 0)
 data Enumerator = Enumerator
   { enumeratorName :: Text
-  , enumeratorConstValue :: Int64
+  , enumeratorConstValue :: Integer
   } deriving (Eq, Ord, Show)
 
 parseEnumerator :: DIE -> M (Boxed Enumerator)
@@ -366,7 +366,16 @@ parseEnumerator die =
   box DW_TAG_enumerator die $
   Enumerator
   <$> getName
-  <*> AttrGetter.getAttr DW_AT_const_value _ATVAL_INT
+  <*> getConstValue
+
+-- It's not clear whether this field is a UNIT or an INT
+getConstValue :: AttrGetterT M Integer
+getConstValue = do
+  m1 <- fmap fromIntegral <$> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
+  m2 <- fmap fromIntegral <$> AttrGetter.findAttr DW_AT_const_value _ATVAL_INT
+  let err = error "Could not find UNINT or INT in DW_AT_const_value field"
+  return $ fromMaybe err (m1 <|> m2)
+
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_decl_file=(DW_ATVAL_UINT 11)
