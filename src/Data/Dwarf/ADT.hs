@@ -457,9 +457,6 @@ parseSubroutineType children = do
       <*> pure params
     _ -> error $ "Unexpected children of SubroutineType: " ++ show extraChildren
 
-getLowPC :: AttrGetterT M Word64
-getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
-
 getMRanges :: AttrGetterT M (Maybe Word64)
 getMRanges = AttrGetter.findAttr DW_AT_ranges _ATVAL_UINT
 
@@ -707,7 +704,7 @@ data CompilationUnit = CompilationUnit
   , cuLanguage :: Dwarf.DW_LANG
   , cuName :: Text
   , cuCompDir :: Text
-  , cuLowPc :: Word64
+  , cuLowPc :: Maybe Word64
   , cuHighPc :: Maybe Word64
   , cuMRanges :: Maybe Word64
   , cuStmtList :: Word64
@@ -724,7 +721,7 @@ parseCU dieMap die =
   <*> (Dwarf.dw_lang <$> AttrGetter.getAttr DW_AT_language _ATVAL_UINT)
   <*> getName
   <*> AttrGetter.getAttr DW_AT_comp_dir _ATVAL_STRING
-  <*> getLowPC
+  <*> getMLowPC
   <*> getMHighPC
   <*> getMRanges
   <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
