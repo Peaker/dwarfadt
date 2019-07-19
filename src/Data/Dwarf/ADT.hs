@@ -664,7 +664,7 @@ data DefType
 data Def
   = DefType DefType
   | DefSubprogram Subprogram
-  | DefVariable (Variable Text)
+  | DefVariable (Variable (Maybe Text))
   deriving (Eq, Ord, Show)
 
 parseDefTypeI :: DIE -> M (Boxed DefType)
@@ -688,7 +688,7 @@ parseDefTypeI die =
 parseDef :: DIE -> M (Boxed Def)
 parseDef die =
   case dieTag die of
-  DW_TAG_variable -> fmap DefVariable <$> parseVariable die getName
+  DW_TAG_variable -> fmap DefVariable <$> parseVariable die getMName
   DW_TAG_subprogram -> mkBox die $ DefSubprogram <$> parseSubprogram (dieReader die) (dieChildren die)
   _ ->
     (fmap . fmap) DefType .

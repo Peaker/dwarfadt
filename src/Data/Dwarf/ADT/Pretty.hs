@@ -223,7 +223,7 @@ def Boxed { bDieId = i, bData = d } = fmap (((showPP i <> " ") <>) . (<> ";")) $
   case d of
   DefType t            -> defType t
   DefSubprogram x      -> Just $ "Subprogram: "      <> defSubprogram x
-  DefVariable x        -> Just $ "Variable: "        <> defVariable Just x
+  DefVariable x        -> Just $ "Variable: "        <> defVariable id x
 
 compilationUnit :: Boxed ADT.CompilationUnit -> PP.Doc
 compilationUnit
