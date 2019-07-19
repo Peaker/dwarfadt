@@ -25,7 +25,6 @@ module Data.Dwarf.ADT
   , Variable(..)
   ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Monad (when)
 import           Control.Monad.Fix (MonadFix, mfix)
 import           Control.Monad.Trans.Class (lift)
@@ -46,8 +45,7 @@ import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Maybe (maybeToList)
 import           Data.Text (Text)
-import           Data.Traversable (traverse)
-import           Data.Word (Word, Word64)
+import           Data.Word (Word64)
 import           Control.Arrow
 
 getName :: Monad m => AttrGetterT m Text

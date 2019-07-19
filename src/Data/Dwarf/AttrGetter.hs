@@ -6,7 +6,6 @@ module Data.Dwarf.AttrGetter
   , getAttr
   ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
 import           Control.Monad (liftM)
 import           Control.Monad.Trans.Class (MonadTrans(..))
 import           Control.Monad.Trans.Reader (ReaderT(..))
@@ -17,7 +16,6 @@ import           Data.Dwarf (DIE(..), DW_AT, DW_ATVAL)
 import qualified Data.Dwarf.Matchers as DwarfMatchers
 import           Data.List (partition)
 import           Data.Maybe (fromMaybe)
-import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 

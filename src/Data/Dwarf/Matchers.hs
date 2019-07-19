@@ -5,7 +5,6 @@ module Data.Dwarf.Matchers where
 import qualified Data.ByteString as BS
 import           Data.Dwarf
 import           Data.Int (Int64)
-import qualified Data.Monoid as Monoid
 import           Data.Text (Text)
 import           Data.Word (Word64)
 

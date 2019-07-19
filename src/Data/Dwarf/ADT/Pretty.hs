@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Data.Dwarf.ADT.Pretty (compilationUnit, dwarf) where
 
-import           Control.Applicative ((<$>))
 import           Data.Dwarf (DW_ATE(..))
 import           Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
 import qualified Data.Dwarf.ADT as ADT

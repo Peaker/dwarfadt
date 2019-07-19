@@ -5,14 +5,12 @@ module Data.Dwarf.Elf
   , parseElfDwarfADT
   ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
 import qualified Data.ByteString as BS
 import qualified Data.Dwarf as Dwarf
 import           Data.Dwarf.ADT (Dwarf)
 import qualified Data.Dwarf.ADT as Dwarf.ADT
 import           Data.Elf (parseElf, Elf(..), ElfSection(..))
 import           Data.List (find)
-import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           System.IO.Posix.MMap (unsafeMMapFile)
