@@ -658,6 +658,7 @@ data DefType
   | DefUnionType UnionType
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
+  | DefRestrictType
   deriving (Eq, Ord, Show)
 
 data Def
@@ -680,6 +681,8 @@ parseDefTypeI die =
   DW_TAG_union_type       -> DefUnionType       <$> parseUnionType (dieChildren die)
   DW_TAG_enumeration_type -> DefEnumerationType <$> parseEnumerationType (dieChildren die)
   DW_TAG_subroutine_type  -> DefSubroutineType  <$> parseSubroutineType (dieChildren die)
+
+  DW_TAG_restrict_type    -> noChildren die $ pure DefRestrictType
   _ -> error $ "unsupported def type: " ++ show die
 
 parseDef :: DIE -> M (Boxed Def)

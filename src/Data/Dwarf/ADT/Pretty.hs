@@ -120,6 +120,7 @@ ppType mName = result . recurseType
     recurseType ADT.Void = mkBaseType "void"
     recurseType (ADT.TypeRef Boxed { bData = typ }) =
       case typ of
+      DefRestrictType -> mkBaseType "restrict"
       DefBaseType x -> mkBaseType $ baseTypeName x
       DefTypedef x -> mkBaseType . text $ ADT.tdName x
       DefStructureType ADT.StructureType { ADT.stName = Just name } ->
@@ -215,6 +216,7 @@ defType t = case t of
   DefStructureType x   -> Just $ "StructureType: "   <> defStructureType x
   DefUnionType x       -> Just $ "UnionType: "       <> defUnionType x
   DefEnumerationType x -> Just $ "EnumerationType: " <> defEnumerationType x
+  DefRestrictType      -> Nothing
 
 def :: Boxed Def -> Maybe PP.Doc
 def Boxed { bDieId = i, bData = d } = fmap (((showPP i <> " ") <>) . (<> ";")) $
