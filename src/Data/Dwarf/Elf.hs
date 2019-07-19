@@ -34,6 +34,7 @@ loadElfDwarf endianess filename = do
     <$> get ".debug_info"
     <*> get ".debug_abbrev"
     <*> get ".debug_str"
+    <*> get ".debug_line"
   pure (elf, Dwarf.parseInfo endianess sections)
 
 parseElfDwarfADT :: Dwarf.Endianess -> FilePath -> IO (Dwarf, [Dwarf.ADT.Warning])
