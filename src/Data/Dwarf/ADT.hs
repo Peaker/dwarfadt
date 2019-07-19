@@ -26,9 +26,6 @@ module Data.Dwarf.ADT
   ) where
 
 import           Control.Applicative (Applicative(..), (<$>))
-import           Control.Lens (Lens')
-import           Control.Lens.Operators
-import           Control.Lens.Tuple
 import           Control.Monad (when)
 import           Control.Monad.Fix (MonadFix, mfix)
 import           Control.Monad.Trans.Class (lift)
@@ -42,7 +39,7 @@ import           Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_A
 import qualified Data.Dwarf as Dwarf
 import           Data.Dwarf.AttrGetter (AttrGetterT)
 import qualified Data.Dwarf.AttrGetter as AttrGetter
-import           Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
+import           Data.Dwarf.Matchers (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
 import           Data.Int (Int64)
 import           Data.List (intercalate)
 import           Data.Map (Map)
@@ -51,6 +48,7 @@ import           Data.Maybe (maybeToList)
 import           Data.Text (Text)
 import           Data.Traversable (traverse)
 import           Data.Word (Word, Word64)
+import           Control.Arrow
 
 getName :: Monad m => AttrGetterT m Text
 getName = AttrGetter.getAttr DW_AT_name _ATVAL_STRING
@@ -167,7 +165,7 @@ box :: DW_TAG -> DIE -> AttrGetterT M a -> M (Boxed a)
 box tag die act
   | tag == dieTag die = mkBox die act
   | otherwise =
-    fail $ "Expected DIE with tag: " ++ show tag ++ " but found: " ++ show die
+    error $ "Expected DIE with tag: " ++ show tag ++ " but found: " ++ show die
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_encoding=(DW_ATVAL_UINT 7)
@@ -424,8 +422,9 @@ data FormalParameters = FormalParameters
   , formalParametersHasUnspecified :: Bool
   } deriving (Eq, Ord, Show)
 
-formalParametersLens :: Lens' FormalParameters [Boxed FormalParameter]
-formalParametersLens f (FormalParameters pars unspec) = (`FormalParameters` unspec) <$> f pars
+formalParametersSetter :: ([Boxed FormalParameter] -> [Boxed FormalParameter])
+                      -> FormalParameters -> FormalParameters
+formalParametersSetter f (FormalParameters pars unspec) = (`FormalParameters` unspec) (f pars)
 
 parseFormalParameters :: [DIE] -> M (FormalParameters, [DIE])
 parseFormalParameters = go
@@ -437,8 +436,9 @@ parseFormalParameters = go
         | dieTag die == DW_TAG_unspecified_parameters -> pure (FormalParameters [] True, rest)
         | dieTag die == DW_TAG_formal_parameter -> do
             param <- parseFormalParameter die
-            go rest <&> _1 . formalParametersLens %~ (param :)
-        | otherwise -> go rest <&> _2 %~ (die:)
+            (\(a, b) -> (formalParametersSetter (param :) a, b))
+              <$> go rest
+        | otherwise -> second (die:) <$> go rest
 
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
@@ -457,7 +457,7 @@ parseSubroutineType children = do
       <$> flag DW_AT_prototyped
       <*> parseTypeRef
       <*> pure params
-    _ -> fail $ "Unexpected children of SubroutineType: " ++ show extraChildren
+    _ -> error $ "Unexpected children of SubroutineType: " ++ show extraChildren
 
 getLowPC :: AttrGetterT M Word64
 getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
