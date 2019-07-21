@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Data.Dwarf.ADT.Pretty (compilationUnit, dwarf) where
 
-import           Control.Applicative ((<$>))
 import           Data.Dwarf (DW_ATE(..))
 import           Data.Dwarf.ADT (Boxed(..), Def(..), DefType(..))
 import qualified Data.Dwarf.ADT as ADT
@@ -121,6 +120,7 @@ ppType mName = result . recurseType
     recurseType ADT.Void = mkBaseType "void"
     recurseType (ADT.TypeRef Boxed { bData = typ }) =
       case typ of
+      DefRestrictType -> mkBaseType "restrict"
       DefBaseType x -> mkBaseType $ baseTypeName x
       DefTypedef x -> mkBaseType . text $ ADT.tdName x
       DefStructureType ADT.StructureType { ADT.stName = Just name } ->
@@ -216,17 +216,18 @@ defType t = case t of
   DefStructureType x   -> Just $ "StructureType: "   <> defStructureType x
   DefUnionType x       -> Just $ "UnionType: "       <> defUnionType x
   DefEnumerationType x -> Just $ "EnumerationType: " <> defEnumerationType x
+  DefRestrictType      -> Nothing
 
 def :: Boxed Def -> Maybe PP.Doc
 def Boxed { bDieId = i, bData = d } = fmap (((showPP i <> " ") <>) . (<> ";")) $
   case d of
   DefType t            -> defType t
   DefSubprogram x      -> Just $ "Subprogram: "      <> defSubprogram x
-  DefVariable x        -> Just $ "Variable: "        <> defVariable Just x
+  DefVariable x        -> Just $ "Variable: "        <> defVariable id x
 
 compilationUnit :: Boxed ADT.CompilationUnit -> PP.Doc
 compilationUnit
-  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc ranges _stmtList defs))
+  (Boxed i (ADT.CompilationUnit producer language name compDir lowPc highPc ranges _stmtList _ defs))
   = PP.vcat
     [ "Compilation unit at " <> showPP i
     , indent $ PP.vcat

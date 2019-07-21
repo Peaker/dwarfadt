@@ -25,10 +25,6 @@ module Data.Dwarf.ADT
   , Variable(..)
   ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
-import           Control.Lens (Lens')
-import           Control.Lens.Operators
-import           Control.Lens.Tuple
 import           Control.Monad (when)
 import           Control.Monad.Fix (MonadFix, mfix)
 import           Control.Monad.Trans.Class (lift)
@@ -42,15 +38,15 @@ import           Data.Dwarf (DieID, DIEMap, DIE(..), DW_TAG(..), DW_AT(..), DW_A
 import qualified Data.Dwarf as Dwarf
 import           Data.Dwarf.AttrGetter (AttrGetterT)
 import qualified Data.Dwarf.AttrGetter as AttrGetter
-import           Data.Dwarf.Lens (_ATVAL_INT, _ATVAL_UINT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
-import           Data.Int (Int64)
+import           Data.Dwarf.Matchers (_ATVAL_UINT, _ATVAL_INT, _ATVAL_REF, _ATVAL_STRING, _ATVAL_BOOL)
 import           Data.List (intercalate)
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (maybeToList)
+import           Data.Maybe (maybeToList, fromMaybe)
 import           Data.Text (Text)
-import           Data.Traversable (traverse)
-import           Data.Word (Word, Word64)
+import           Data.Word (Word64)
+import           Control.Arrow
+import           Control.Applicative((<|>))
 
 getName :: Monad m => AttrGetterT m Text
 getName = AttrGetter.getAttr DW_AT_name _ATVAL_STRING
@@ -167,7 +163,7 @@ box :: DW_TAG -> DIE -> AttrGetterT M a -> M (Boxed a)
 box tag die act
   | tag == dieTag die = mkBox die act
   | otherwise =
-    fail $ "Expected DIE with tag: " ++ show tag ++ " but found: " ++ show die
+    error $ "Expected DIE with tag: " ++ show tag ++ " but found: " ++ show die
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_encoding=(DW_ATVAL_UINT 7)
@@ -362,7 +358,7 @@ parseUnionType children =
 -- DW_AT_const_value=(DW_ATVAL_INT 0)
 data Enumerator = Enumerator
   { enumeratorName :: Text
-  , enumeratorConstValue :: Int64
+  , enumeratorConstValue :: Integer
   } deriving (Eq, Ord, Show)
 
 parseEnumerator :: DIE -> M (Boxed Enumerator)
@@ -370,7 +366,16 @@ parseEnumerator die =
   box DW_TAG_enumerator die $
   Enumerator
   <$> getName
-  <*> AttrGetter.getAttr DW_AT_const_value _ATVAL_INT
+  <*> getConstValue
+
+-- It's not clear whether this field is a UNIT or an INT
+getConstValue :: AttrGetterT M Integer
+getConstValue = do
+  m1 <- fmap fromIntegral <$> AttrGetter.findAttr DW_AT_const_value _ATVAL_UINT
+  m2 <- fmap fromIntegral <$> AttrGetter.findAttr DW_AT_const_value _ATVAL_INT
+  let err = error "Could not find UNINT or INT in DW_AT_const_value field"
+  return $ fromMaybe err (m1 <|> m2)
+
 
 -- DW_AT_byte_size=(DW_ATVAL_UINT 4)
 -- DW_AT_decl_file=(DW_ATVAL_UINT 11)
@@ -424,8 +429,9 @@ data FormalParameters = FormalParameters
   , formalParametersHasUnspecified :: Bool
   } deriving (Eq, Ord, Show)
 
-formalParametersLens :: Lens' FormalParameters [Boxed FormalParameter]
-formalParametersLens f (FormalParameters pars unspec) = (`FormalParameters` unspec) <$> f pars
+formalParametersSetter :: ([Boxed FormalParameter] -> [Boxed FormalParameter])
+                      -> FormalParameters -> FormalParameters
+formalParametersSetter f (FormalParameters pars unspec) = (`FormalParameters` unspec) (f pars)
 
 parseFormalParameters :: [DIE] -> M (FormalParameters, [DIE])
 parseFormalParameters = go
@@ -437,8 +443,9 @@ parseFormalParameters = go
         | dieTag die == DW_TAG_unspecified_parameters -> pure (FormalParameters [] True, rest)
         | dieTag die == DW_TAG_formal_parameter -> do
             param <- parseFormalParameter die
-            go rest <&> _1 . formalParametersLens %~ (param :)
-        | otherwise -> go rest <&> _2 %~ (die:)
+            (\(a, b) -> (formalParametersSetter (param :) a, b))
+              <$> go rest
+        | otherwise -> second (die:) <$> go rest
 
 data SubroutineType = SubroutineType
   { subrPrototyped :: Bool
@@ -457,10 +464,7 @@ parseSubroutineType children = do
       <$> flag DW_AT_prototyped
       <*> parseTypeRef
       <*> pure params
-    _ -> fail $ "Unexpected children of SubroutineType: " ++ show extraChildren
-
-getLowPC :: AttrGetterT M Word64
-getLowPC = AttrGetter.getAttr DW_AT_low_pc _ATVAL_UINT
+    _ -> error $ "Unexpected children of SubroutineType: " ++ show extraChildren
 
 getMRanges :: AttrGetterT M (Maybe Word64)
 getMRanges = AttrGetter.findAttr DW_AT_ranges _ATVAL_UINT
@@ -660,12 +664,13 @@ data DefType
   | DefUnionType UnionType
   | DefEnumerationType EnumerationType
   | DefSubroutineType SubroutineType
+  | DefRestrictType
   deriving (Eq, Ord, Show)
 
 data Def
   = DefType DefType
   | DefSubprogram Subprogram
-  | DefVariable (Variable Text)
+  | DefVariable (Variable (Maybe Text))
   deriving (Eq, Ord, Show)
 
 parseDefTypeI :: DIE -> M (Boxed DefType)
@@ -682,12 +687,14 @@ parseDefTypeI die =
   DW_TAG_union_type       -> DefUnionType       <$> parseUnionType (dieChildren die)
   DW_TAG_enumeration_type -> DefEnumerationType <$> parseEnumerationType (dieChildren die)
   DW_TAG_subroutine_type  -> DefSubroutineType  <$> parseSubroutineType (dieChildren die)
+
+  DW_TAG_restrict_type    -> noChildren die $ pure DefRestrictType
   _ -> error $ "unsupported def type: " ++ show die
 
 parseDef :: DIE -> M (Boxed Def)
 parseDef die =
   case dieTag die of
-  DW_TAG_variable -> fmap DefVariable <$> parseVariable die getName
+  DW_TAG_variable -> fmap DefVariable <$> parseVariable die getMName
   DW_TAG_subprogram -> mkBox die $ DefSubprogram <$> parseSubprogram (dieReader die) (dieChildren die)
   _ ->
     (fmap . fmap) DefType .
@@ -706,11 +713,11 @@ data CompilationUnit = CompilationUnit
   , cuLanguage :: Dwarf.DW_LANG
   , cuName :: Text
   , cuCompDir :: Text
-  , cuLowPc :: Word64
+  , cuLowPc :: Maybe Word64
   , cuHighPc :: Maybe Word64
   , cuMRanges :: Maybe Word64
-  , cuStmtList :: Word64 -- TODO: Parse this further
---  , cuLineNumInfo :: ([Text], [Dwarf.DW_LNE])
+  , cuStmtList :: Word64
+  , cuLineNumInfo :: Maybe Dwarf.LNE
   , cuDefs :: [Boxed Def]
   } deriving (Show)
 
@@ -723,11 +730,11 @@ parseCU dieMap die =
   <*> (Dwarf.dw_lang <$> AttrGetter.getAttr DW_AT_language _ATVAL_UINT)
   <*> getName
   <*> AttrGetter.getAttr DW_AT_comp_dir _ATVAL_STRING
-  <*> getLowPC
+  <*> getMLowPC
   <*> getMHighPC
   <*> getMRanges
   <*> AttrGetter.getAttr DW_AT_stmt_list _ATVAL_UINT
-  -- lineNumInfo
+  <*> pure (dieLineInfo die)
   <*> mapM (lift . parseDef) (dieChildren die)
 
 fromDie :: DIEMap -> DIE -> (Boxed CompilationUnit, [Warning])

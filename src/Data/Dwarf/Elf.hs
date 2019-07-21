@@ -5,14 +5,12 @@ module Data.Dwarf.Elf
   , parseElfDwarfADT
   ) where
 
-import           Control.Applicative (Applicative(..), (<$>))
 import qualified Data.ByteString as BS
 import qualified Data.Dwarf as Dwarf
 import           Data.Dwarf.ADT (Dwarf)
 import qualified Data.Dwarf.ADT as Dwarf.ADT
 import           Data.Elf (parseElf, Elf(..), ElfSection(..))
 import           Data.List (find)
-import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as Text
 import           System.IO.Posix.MMap (unsafeMMapFile)
@@ -34,9 +32,11 @@ loadElfDwarf endianess filename = do
     <$> get ".debug_info"
     <*> get ".debug_abbrev"
     <*> get ".debug_str"
+    <*> get ".debug_line"
   pure (elf, Dwarf.parseInfo endianess sections)
 
-parseElfDwarfADT :: Dwarf.Endianess -> FilePath -> IO (Dwarf, [Dwarf.ADT.Warning])
+parseElfDwarfADT :: Dwarf.Endianess -> FilePath -> IO ((Dwarf, [Dwarf.ADT.Warning]))
+
 parseElfDwarfADT endianess filename = do
   (_elf, (cuDies, dieMap)) <- loadElfDwarf endianess filename
-  pure $ Dwarf.ADT.fromDies dieMap cuDies
+  pure $ (Dwarf.ADT.fromDies dieMap cuDies)
